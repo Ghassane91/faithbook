@@ -1,0 +1,18 @@
+# Normalise les fins de ligne : LF dans le dépôt et à la sortie, quel que soit
+# l'OS. Indispensable ici — les scripts et l'image tournent sous Linux, où un
+# CRLF casserait docker-entrypoint.sh (« bad interpreter »).
+* text=auto eol=lf
+
+# Scripts et fichiers exécutés en conteneur : LF strict.
+*.sh            text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile      text eol=lf
+*.py            text eol=lf
+
+# Fichiers binaires : jamais de conversion.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.enc           binary
+*.db            binary
+*.ico           binary

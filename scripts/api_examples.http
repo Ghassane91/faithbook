@@ -1,0 +1,88 @@
+### Exemples d'appels API (extension REST Client / IntelliJ HTTP Client)
+@base = http://localhost:8000
+# @apikey = votre-cle    # decommenter si API_KEY est definie dans .env
+
+### Etat du service
+GET {{base}}/api/health
+
+### Configuration effective (sans secrets)
+GET {{base}}/api/config
+
+### Verifier l'acces Google Drive
+POST {{base}}/api/drive/check
+
+### Creer une cible simple (capture quotidienne a 09h00)
+POST {{base}}/api/targets
+Content-Type: application/json
+
+{
+  "name": "Page d'accueil",
+  "url": "https://example.com",
+  "run_time": "09:00"
+}
+
+### Creer une cible avancee (cron, masquage de bandeau cookies, sous-dossier Drive)
+POST {{base}}/api/targets
+Content-Type: application/json
+
+{
+  "name": "Rapport hebdo",
+  "url": "https://example.com/rapport",
+  "cron_expression": "30 8 * * 1",
+  "timezone_name": "Africa/Casablanca",
+  "viewport_width": 1920,
+  "viewport_height": 1080,
+  "wait_until": "networkidle",
+  "wait_after_load_ms": 3000,
+  "hide_selectors": "#cookie-banner;.newsletter-popup",
+  "subfolder": "rapports"
+}
+
+### Lister les cibles
+GET {{base}}/api/targets
+
+### Modifier une cible (changer l'heure)
+PATCH {{base}}/api/targets/1
+Content-Type: application/json
+
+{
+  "run_time": "18:30"
+}
+
+### Desactiver une cible
+PATCH {{base}}/api/targets/1
+Content-Type: application/json
+
+{
+  "enabled": false
+}
+
+### Lancement manuel
+POST {{base}}/api/targets/1/run
+
+### Lancement manuel force (ignore la deduplication)
+POST {{base}}/api/targets/1/run?force=true
+
+### Taches planifiees et prochaines executions
+GET {{base}}/api/scheduler/jobs
+
+### Historique global
+GET {{base}}/api/runs?limit=20
+
+### Filtrer les executions en echec
+GET {{base}}/api/runs?status=failed
+
+### Executions d'un jour donne
+GET {{base}}/api/runs?capture_date=2026-07-20
+
+### Detail d'une execution avec ses logs
+GET {{base}}/api/runs/1
+
+### Logs seuls
+GET {{base}}/api/runs/1/logs
+
+### Telecharger la capture
+GET {{base}}/api/runs/1/screenshot
+
+### Supprimer une cible (et son historique)
+DELETE {{base}}/api/targets/1

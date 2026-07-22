@@ -1,0 +1,32 @@
+services:
+  backend:
+    build: .
+    container_name: faithbook-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Donnees internes : base SQLite, journaux.
+      - ./data:/data
+      # Dossier de sortie des captures. C'est LA ligne a changer pour
+      # deplacer les captures (Bureau en local, /var/captures sur un VPS).
+      - "${OUTPUT_DIR:-./data/screenshots}:/output"
+      - ./secrets:/secrets:ro
+    # Chromium a besoin de plus que les 64Mo /dev/shm par defaut ; et les profils
+    # navigateur sont dechiffres dans /dev/shm (en RAM, jamais en clair sur disque).
+    shm_size: "1gb"
+    # 6080 (noVNC) n'est PAS publie sur l'hote : il n'est accessible qu'a travers
+    # le proxy nginx du frontend, lui-meme protege par l'authentification.
+    expose:
+      - "6080"
+
+  frontend:
+    build: ./frontend
+    container_name: faithbook-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"

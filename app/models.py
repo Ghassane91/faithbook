@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import enum
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class RunStatus(str, enum.Enum):
+    pending = "pending"
+    running = "running"
+    success = "success"
+    failed = "failed"
+    skipped = "skipped"  # doublon evite
+    suspended = "suspended"  # intervention humaine requise (2FA, captcha, session expiree)
+
+
+class TriggerType(str, enum.Enum):
+    scheduled = "scheduled"
+    manual = "manual"
+
+
+class AccountStatus(str, enum.Enum):
+    never = "never"  # profil cree, jamais connecte
+    connected = "connected"
+    expired = "expired"
+    verification_required = "verification_required"  # 2FA / captcha / checkpoint
+    error = "error"
+
+
+class CaptureMode(str, enum.Enum):
+    desktop = "desktop"
+    mobile = "mobile"
+
+
+class User(Base):
+    """Compte d'acces a l'interface."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Force le changement du mot de passe genere automatiquement au 1er demarrage.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    sessions: Mapped[list[AuthSession]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class AuthSession(Base):
+    """Session ouverte. Jeton opaque stocke en base : revocable a tout moment,
+    contrairement a un JWT qui reste valide jusqu'a son expiration."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # On ne stocke que l'empreinte : une fuite de la base ne donne aucun jeton utilisable.
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+    ip: Mapped[str | None] = mapped_column(String(60))
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class PasswordResetToken(Base):
+    """Jeton de réinitialisation de mot de passe, à usage unique et daté.
+
+    Comme pour les sessions, seule l'empreinte du jeton est stockée : une fuite
+    de la base ne permet pas de forger un lien de réinitialisation valide.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Renseigné à la consommation : un jeton déjà utilisé est refusé.
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Account(Base):
+    """Un compte connecté (ex. Facebook) avec son profil navigateur isolé.
+
+    Aucun mot de passe de la plateforme n'est stocké : seule la session
+    (cookies) obtenue par connexion manuelle est conservée, et chiffrée.
+    """
+
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Propriétaire : une session ne doit jamais être partagée entre utilisateurs.
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    platform: Mapped[str] = mapped_column(String(40), default="facebook", nullable=False)
+    # Slug du profil navigateur isolé (coffre chiffré profiles/<slug>.tar.enc).
+    profile_slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+
+    status: Mapped[AccountStatus] = mapped_column(
+        Enum(AccountStatus), default=AccountStatus.never, nullable=False, index=True
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+    # Sauvegarde chiffrée du storage_state (cookies). Le profil de travail vit
+    # dans le coffre ; ceci est une copie exportée, elle aussi chiffrée.
+    encrypted_state: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    targets: Mapped[list[Target]] = relationship(back_populates="account")
+
+
+class AuditLog(Base):
+    """Journal des actions sensibles (connexion de compte, suppression de
+    session, gestion des cibles, changement de mot de passe...)."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # Dénormalisé : l'entrée doit survivre à la suppression de l'utilisateur.
+    user_email: Mapped[str | None] = mapped_column(String(255))
+    action: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    detail: Mapped[str | None] = mapped_column(Text)
+    ip: Mapped[str | None] = mapped_column(String(60))
+
+
+class Target(Base):
+    """Une URL a capturer avec son horaire."""
+
+    __tablename__ = "targets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Planification : soit une heure quotidienne HH:MM, soit une expression cron.
+    run_time: Mapped[str | None] = mapped_column(String(5))
+    cron_expression: Mapped[str | None] = mapped_column(String(120))
+    timezone_name: Mapped[str | None] = mapped_column(String(64))
+
+    # Options de capture (NULL => valeur par defaut globale)
+    viewport_width: Mapped[int | None] = mapped_column(Integer)
+    viewport_height: Mapped[int | None] = mapped_column(Integer)
+    full_page: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    wait_until: Mapped[str] = mapped_column(String(20), default="networkidle", nullable=False)
+    wait_after_load_ms: Mapped[int | None] = mapped_column(Integer)
+    timeout_ms: Mapped[int | None] = mapped_column(Integer)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    locale: Mapped[str | None] = mapped_column(String(20))
+    # Selecteurs CSS masques avant capture (bandeaux cookies, popups...), separes par ";"
+    hide_selectors: Mapped[str | None] = mapped_column(Text)
+    # Selecteurs CSS cliques avant capture (fermeture de bandeaux/modales), separes par ";".
+    # Un selecteur absent est ignore sans erreur.
+    dismiss_selectors: Mapped[str | None] = mapped_column(Text)
+    # Cookies/session Playwright (storage_state JSON) pour les pages authentifiees
+    storage_state_json: Mapped[str | None] = mapped_column(Text)
+    # Profil Chromium persistant (/data/profiles/<nom>) : garde la session vivante
+    # entre les executions, car Facebook fait tourner ses cookies.
+    session_profile: Mapped[str | None] = mapped_column(String(64))
+
+    # Compte connecté à utiliser (session partagée entre les cibles d'un compte).
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), index=True
+    )
+    # Rendu ordinateur ou mobile.
+    capture_mode: Mapped[CaptureMode] = mapped_column(
+        Enum(CaptureMode), default=CaptureMode.desktop, nullable=False
+    )
+    # Délai entre deux tentatives (NULL => valeur globale RETRY_BACKOFF_SECONDS).
+    retry_backoff_seconds: Mapped[int | None] = mapped_column(Integer)
+
+    # Garde-fous : sans eux, une session expiree produit des captures du mur de
+    # connexion pendant des semaines sans qu'aucune erreur ne soit remontee.
+    expected_selector: Mapped[str | None] = mapped_column(Text)
+    fail_if_url_contains: Mapped[str | None] = mapped_column(Text)
+
+    # Sous-dossier optionnel a l'interieur du dossier du jour
+    subfolder: Mapped[str | None] = mapped_column(String(200))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    runs: Mapped[list[Run]] = relationship(
+        back_populates="target", cascade="all, delete-orphan", passive_deletes=True
+    )
+    account: Mapped[Account | None] = relationship(back_populates="targets")
+
+
+class Run(Base):
+    """Une execution (planifiee ou manuelle) et son resultat."""
+
+    __tablename__ = "runs"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_runs_idempotency_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("targets.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+
+    status: Mapped[RunStatus] = mapped_column(
+        Enum(RunStatus), default=RunStatus.pending, nullable=False, index=True
+    )
+    trigger: Mapped[TriggerType] = mapped_column(Enum(TriggerType), nullable=False)
+
+    # Date locale (fuseau configure) de la capture : sert au dossier Drive et a la deduplication
+    capture_date: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(120))
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    screenshot_path: Mapped[str | None] = mapped_column(Text)
+    screenshot_bytes: Mapped[int | None] = mapped_column(Integer)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    page_title: Mapped[str | None] = mapped_column(Text)
+    final_url: Mapped[str | None] = mapped_column(Text)
+
+    # --- Integration Google Drive : EN SUSPEND (voir README §2) -----------
+    # Colonnes conservees pour ne rien perdre si l'option est reactivee.
+    # Elles ne sont pas exposees par l'API tant que Drive est en suspend.
+    drive_folder_id: Mapped[str | None] = mapped_column(String(120))
+    drive_file_id: Mapped[str | None] = mapped_column(String(120))
+    drive_file_link: Mapped[str | None] = mapped_column(Text)
+
+    error_message: Mapped[str | None] = mapped_column(Text)
+    skipped_reason: Mapped[str | None] = mapped_column(Text)
+
+    # Capture de diagnostic prise en cas d'echec (etat de la page au moment de l'erreur).
+    diagnostic_path: Mapped[str | None] = mapped_column(Text)
+    # Statut de la session du compte au moment de l'execution.
+    session_status: Mapped[str | None] = mapped_column(String(40))
+
+    target: Mapped[Target] = relationship(back_populates="runs")
+    logs: Mapped[list[RunLog]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="RunLog.id",
+    )
+
+
+class RunLog(Base):
+    """Journal detaille, etape par etape, d'une execution."""
+
+    __tablename__ = "run_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    level: Mapped[str] = mapped_column(String(10), default="INFO", nullable=False)
+    step: Mapped[str] = mapped_column(String(50), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt: Mapped[int | None] = mapped_column(Integer)
+
+    run: Mapped[Run] = relationship(back_populates="logs")
