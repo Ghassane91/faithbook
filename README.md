@@ -114,17 +114,21 @@ Une seule ligne du `.env` le décide :
 OUTPUT_DIR=./captures
 ```
 
-Le backend y crée automatiquement un dossier par jour, et un sous-dossier par
-cible si `subfolder` est renseigné :
+Le backend crée **un dossier par site** (déduit de l'URL) et nomme le fichier
+d'après le **site, la date et l'heure** — reconnaissable au premier coup d'œil :
 
 ```
 captures/
-  2026-07-20/
-    ma-page/
-      2026-07-20_ma-page_090012.png
-  2026-07-21/
-    ...
+  facebook.com-spypoint.ca/
+    facebook.com-spypoint.ca_2026-07-22_090012.png
+  integr-it.com/
+    integr-it.com_2026-07-22_090300.png
 ```
+
+Le nom du site vient du domaine (sans `www`) plus le chemin de page éventuel,
+pour distinguer deux pages d'un même domaine
+(`facebook.com/SPYPOINT.CA` → `facebook.com-spypoint.ca`). Un `subfolder` de
+cible, si renseigné, s'insère sous le dossier du site.
 
 Règles pour `OUTPUT_DIR` :
 

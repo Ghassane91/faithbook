@@ -6,6 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
@@ -32,8 +33,28 @@ def slugify(value: str, max_len: int = 60) -> str:
     return (cleaned[:max_len] or "capture").lower()
 
 
+def site_label(url: str) -> str:
+    """Étiquette lisible du site/page tirée de l'URL : domaine (sans `www`) et,
+    s'il existe, le chemin — pour distinguer deux pages d'un même domaine.
+
+    https://www.facebook.com/SPYPOINT.CA  ->  facebook.com-spypoint.ca
+    http://www.integr-it.com              ->  integr-it.com
+    """
+    try:
+        parsed = urlparse(url if "//" in url else "http://" + url)
+    except Exception:  # noqa: BLE001
+        return "site"
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0].lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = parsed.path.strip("/")
+    label = f"{host}/{path}" if path else host
+    return slugify(label, 80) or "site"
+
+
 def build_filename(target: Target, capture_date: str, stamp: str) -> str:
-    return f"{capture_date}_{slugify(target.name)}_{stamp}.png"
+    # Nom reconnaissable : <site>_<date>_<heure>.png
+    return f"{site_label(target.url)}_{capture_date}_{stamp}.png"
 
 
 THUMB_WIDTH = 520

@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import session_scope
 from app.models import Account, Run, RunLog, RunStatus, Target, TriggerType, utcnow
-from app.services.capture import build_filename, capture_page, make_thumbnail, slugify
+from app.services.capture import (
+    build_filename,
+    capture_page,
+    make_thumbnail,
+    site_label,
+    slugify,
+)
 from app.services.drive import DriveNotConfigured, drive_client
 from app.services.session_check import encrypted_state_to_storage
 
@@ -216,8 +222,8 @@ async def _attempt_once(
     stamp = now.strftime("%H%M%S")
     filename = build_filename(target, run.capture_date, stamp)
 
-    # Dossier date, identique en local et sur Drive.
-    folder_name = now.strftime(settings.folder_date_format)
+    # Un dossier par site (le « dossier relatif » au site capturé).
+    folder_name = site_label(target.url)
     destination = Path(settings.screenshot_dir) / folder_name
     if target.subfolder:
         destination = destination / slugify(target.subfolder)
