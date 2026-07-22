@@ -70,18 +70,27 @@ commandes `ps2exe` que le lanceur).
 
 ### Envoyer les captures vers Google Drive
 
-Pas besoin de l'API Google : le plus simple est **Google Drive pour ordinateur**.
+Pas besoin de l'API Google : on écrit dans un dossier synchronisé par **Google
+Drive pour ordinateur** (`google.com/drive/download`, crée un lecteur type
+`G:\Mon Drive`). Deux chemins, car ils ne subissent pas la même contrainte :
 
-1. Installe **Google Drive pour ordinateur** (`google.com/drive/download`). Il
-   crée un lecteur synchronisé (souvent `G:\Mon Drive`).
-2. Crée un dossier, par ex. `G:\Mon Drive\FaithBook`.
-3. **Bureau** : dans `Config-capture-bureau.exe`, choisis ce dossier comme
-   destination (bouton « … »).
-4. **Pages web** : dans `.env`, mets `OUTPUT_DIR=G:/Mon Drive/FaithBook/web`,
-   puis relance (`docker compose up -d`).
+- **Bureau** (agent natif Windows) : écrit **directement** dans le dossier Drive.
+  Dans `Config-capture-bureau.exe`, choisis par ex. `G:\Mon Drive\FaithBook\bureau`
+  comme destination (bouton « … »). ✅ direct.
+- **Pages web** (écrites par le conteneur Docker) : **le conteneur ne peut pas
+  écrire sur le lecteur Google Drive** (système de fichiers virtuel « Stream » —
+  vérifié). On garde donc `OUTPUT_DIR=./captures` en local, et une tâche planifiée
+  **`sync-drive-web.exe`** (toutes les 15 min, robocopy natif) recopie
+  `captures/` vers `G:\Mon Drive\FaithBook\web`.
 
-Google Drive synchronise ces dossiers automatiquement — aucune clé, aucun compte
-de service. (L'intégration API Drive côté serveur reste possible, voir §2.)
+Résultat : tout se retrouve sous `G:\Mon Drive\FaithBook\` et Google Drive
+synchronise vers le cloud — aucune clé, aucun compte de service. La destination
+de la synchro web se règle dans `capture-bureau/sync-drive.config.txt`.
+(L'intégration API Drive côté serveur reste une alternative, voir §2.)
+
+> Deux tâches planifiées Windows sont créées : **« FaithBook - Capture bureau »**
+> (à ton heure) et **« FaithBook - Sync Drive »** (toutes les 15 min). Visibles
+> dans le Planificateur de tâches.
 
 ### Première connexion
 

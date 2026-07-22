@@ -17,6 +17,6 @@ Thumbs.db
 # Exécutables du lanceur Windows : générés depuis les .ps1 (voir README §1).
 *.exe
 
-# Capture bureau : config machine + journal local (exe couverts par *.exe).
-capture-bureau/bureau.config.txt
+# Outils Windows : config machine + journaux locaux (exe couverts par *.exe).
+capture-bureau/*.config.txt
 capture-bureau/*.log
