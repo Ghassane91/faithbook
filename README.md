@@ -50,6 +50,39 @@ Invoke-ps2exe FaithBook-Stop.ps1 FaithBook-Stop.exe -noConsole -title "FaithBook
 
 Prérequis : **Docker Desktop** installé. Les lanceurs le démarrent au besoin.
 
+### Capture planifiée du bureau (Windows)
+
+En plus des pages web (capturées dans le conteneur), un petit **agent natif
+Windows** capture ton **écran entier** (tous les moniteurs) à l'heure de ton
+choix — le conteneur Docker, isolé, ne peut pas voir le bureau. Outils dans
+[`capture-bureau/`](capture-bureau/) :
+
+- **`Config-capture-bureau.exe`** (raccourci Bureau « FaithBook - Capture bureau »)
+  — fenêtre où l'on choisit **l'heure** et le **dossier de destination**, puis
+  « Enregistrer la planification » crée une **tâche Windows quotidienne**. Boutons
+  *Tester maintenant* et *Supprimer la planification*.
+- **`capture-bureau.exe`** — la capture elle-même, lancée par la tâche planifiée.
+
+Le dossier de destination est mémorisé dans `capture-bureau/bureau.config.txt`.
+La capture exige une **session ouverte et déverrouillée** (écran verrouillé =
+image noire). Les `.exe` sont générés depuis les `.ps1` du dossier (mêmes
+commandes `ps2exe` que le lanceur).
+
+### Envoyer les captures vers Google Drive
+
+Pas besoin de l'API Google : le plus simple est **Google Drive pour ordinateur**.
+
+1. Installe **Google Drive pour ordinateur** (`google.com/drive/download`). Il
+   crée un lecteur synchronisé (souvent `G:\Mon Drive`).
+2. Crée un dossier, par ex. `G:\Mon Drive\FaithBook`.
+3. **Bureau** : dans `Config-capture-bureau.exe`, choisis ce dossier comme
+   destination (bouton « … »).
+4. **Pages web** : dans `.env`, mets `OUTPUT_DIR=G:/Mon Drive/FaithBook/web`,
+   puis relance (`docker compose up -d`).
+
+Google Drive synchronise ces dossiers automatiquement — aucune clé, aucun compte
+de service. (L'intégration API Drive côté serveur reste possible, voir §2.)
+
 ### Première connexion
 
 L'interface est protégée par identifiant. Au premier démarrage, un compte est
