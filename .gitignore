@@ -13,3 +13,6 @@ frontend/dist/
 **/.claude/settings.local.json
 .DS_Store
 Thumbs.db
+
+# Exécutables du lanceur Windows : générés depuis les .ps1 (voir README §1).
+*.exe

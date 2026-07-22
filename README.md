@@ -30,6 +30,26 @@ docker compose up -d --build
 > conteneur `fencive-ui`. Réglé par `API_PORT=8020` dans le `.env`, sans aucune
 > modification de code.
 
+### Lanceur Windows (double-clic)
+
+Pour éviter la ligne de commande sous Windows, deux lanceurs à double-cliquer
+sont fournis à la racine du projet :
+
+- **`FaithBook.exe`** — démarre Docker si besoin, lance les conteneurs et ouvre
+  l'interface dans le navigateur (une petite fenêtre affiche la progression).
+- **`FaithBook-Stop.exe`** — arrête les conteneurs (les données sont conservées).
+
+Les `.exe` sont générés depuis les scripts versionnés `FaithBook.ps1` /
+`FaithBook-Stop.ps1` (ils ne sont pas dans le dépôt). Pour les (re)compiler :
+
+```powershell
+Install-Module ps2exe -Scope CurrentUser        # une seule fois
+Invoke-ps2exe FaithBook.ps1 FaithBook.exe -noConsole -title FaithBook
+Invoke-ps2exe FaithBook-Stop.ps1 FaithBook-Stop.exe -noConsole -title "FaithBook (arret)"
+```
+
+Prérequis : **Docker Desktop** installé. Les lanceurs le démarrent au besoin.
+
 ### Première connexion
 
 L'interface est protégée par identifiant. Au premier démarrage, un compte est
