@@ -1,7 +1,8 @@
 # FaithBook — captures planifiées
 
 Backend conteneurisé qui capture automatiquement des pages web à une heure
-configurable et range les captures dans un dossier daté.
+configurable et range les captures dans un dossier par site (nom de fichier =
+site + date + heure).
 
 - **API** : FastAPI (documentation OpenAPI sur `/docs`)
 - **Navigateur** : Playwright / Chromium
@@ -186,8 +187,8 @@ Pour réactiver plus tard : décommenter le bloc `GOOGLE_*` du `.env`, passer
 | 1 | URL + heure configurables | Table `targets`, `run_time` (HH:MM) ou `cron_expression` — [models.py](app/models.py) |
 | 2 | Ouverture automatique | APScheduler → [scheduler.py](app/scheduler.py) |
 | 3 | Capture complète | `full_page=True` + pré-scroll lazy-load — [capture.py](app/services/capture.py) |
-| 4 | Dossier daté | Créé dans `OUTPUT_DIR` — [runner.py](app/services/runner.py) |
-| 5 | Dépôt de la capture | Écriture dans le dossier daté |
+| 4 | Rangement par site | Un dossier par site dans `OUTPUT_DIR` — [runner.py](app/services/runner.py) |
+| 5 | Dépôt de la capture | Écriture dans le dossier du site, nom = site + date + heure |
 | 6 | Éviter les doublons | 3 niveaux, voir §4 — [runner.py](app/services/runner.py) |
 | 7 | Réessai automatique | Backoff exponentiel, `MAX_ATTEMPTS` — [runner.py](app/services/runner.py) |
 | 8 | Logs + statut par exécution | Tables `runs` / `run_logs` + fichier `data/app.log` |
@@ -206,7 +207,7 @@ Pour réactiver plus tard : décommenter le bloc `GOOGLE_*` du `.env`, passer
 | `off` | Aucune déduplication. |
 
 Un fichier ne peut pas non plus être écrasé par accident : chaque nom contient
-l'heure de capture, et le dossier du jour est réutilisé, jamais recréé.
+la date et l'heure de capture, et le dossier du site est réutilisé, jamais recréé.
 
 `POST /api/targets/{id}/run?force=true` contourne la déduplication (utile en test).
 
