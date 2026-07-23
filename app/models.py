@@ -281,6 +281,9 @@ class Run(Base):
     change_ratio: Mapped[float | None] = mapped_column(Float)
     changed: Mapped[bool | None] = mapped_column(Boolean)
 
+    # Metriques publiques extraites de la page (JSON), ex. {"followers": 12345}.
+    metrics: Mapped[str | None] = mapped_column(Text)
+
     target: Mapped[Target] = relationship(back_populates="runs")
     logs: Mapped[list[RunLog]] = relationship(
         back_populates="run",

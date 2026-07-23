@@ -3,6 +3,7 @@ import type {
   Health,
   Job,
   LoginStatus,
+  MetricsSeries,
   Run,
   RunSummary,
   SessionStatus,
@@ -88,6 +89,7 @@ export const api = {
       { method: 'POST' },
     ),
   sessionStatus: (id: number) => request<SessionStatus>(`/targets/${id}/session`),
+  targetMetrics: (id: number) => request<MetricsSeries>(`/targets/${id}/metrics`),
 
   accounts: () => request<Account[]>('/accounts'),
   createAccount: (name: string, platform = 'facebook') =>

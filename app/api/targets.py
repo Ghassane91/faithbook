@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.database import get_session
-from app.models import Run, Target, TriggerType
+from app.models import Run, RunStatus, Target, TriggerType
+from app.services.metrics import LABELS as METRIC_LABELS
 from app.scheduler import next_run_for, schedule_target, unschedule_target
 from app.schemas import (
     RunSummary,
@@ -203,3 +206,31 @@ def target_runs(
         select(Run).where(Run.target_id == target_id).order_by(Run.id.desc()).limit(limit)
     ).all()
     return [RunSummary.model_validate(r) for r in runs]
+
+
+@router.get("/{target_id}/metrics", summary="Série temporelle des métriques (abonnés…)")
+def target_metrics(target_id: int, session: Session = Depends(get_session)):
+    """Historique des métriques relevées : une entrée par capture réussie qui en
+    contient (la dernière capture du jour prime). Prêt à tracer un graphique."""
+    if session.get(Target, target_id) is None:
+        raise HTTPException(status_code=404, detail="Cible introuvable")
+    runs = session.scalars(
+        select(Run)
+        .where(Run.target_id == target_id, Run.status == RunStatus.success, Run.metrics.is_not(None))
+        .order_by(Run.id.asc())
+    ).all()
+
+    par_jour: dict[str, dict] = {}
+    cles: set[str] = set()
+    for run in runs:
+        try:
+            data = json.loads(run.metrics)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict) or not data:
+            continue
+        cles.update(data.keys())
+        par_jour[run.capture_date] = {"date": run.capture_date, **data}
+
+    points = [par_jour[d] for d in sorted(par_jour)]
+    return {"keys": sorted(cles), "points": points, "labels": METRIC_LABELS}

@@ -69,6 +69,17 @@ export interface Target {
 
 export type TargetInput = Partial<Omit<Target, 'id' | 'created_at' | 'updated_at' | 'next_run_at' | 'last_run' | 'has_session' | 'session_expires_at'>>
 
+export interface MetricPoint {
+  date: string
+  [key: string]: string | number
+}
+
+export interface MetricsSeries {
+  keys: string[]
+  points: MetricPoint[]
+  labels: Record<string, string>
+}
+
 export interface Health {
   status: string
   version: string

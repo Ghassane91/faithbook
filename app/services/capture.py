@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright
 
 from app.config import settings
 from app.models import Target
+from app.services.metrics import parse_page_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class CaptureResult:
     sha256: str
     page_title: str
     final_url: str
+    metrics: dict | None = None  # abonnés / mentions J'aime repérés dans la page
 
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -267,6 +269,13 @@ async def capture_page(
 
             title = await page.title()
             final_url = page.url
+            # Métriques (abonnés, mentions J'aime…) depuis le texte de la page,
+            # best-effort : un échec ici ne compromet jamais la capture.
+            try:
+                body_text = await page.inner_text("body")
+                metrics = parse_page_metrics(body_text) or None
+            except Exception:  # noqa: BLE001
+                metrics = None
             await page.screenshot(path=str(destination), full_page=target.full_page)
         finally:
             await context.close()
@@ -280,4 +289,5 @@ async def capture_page(
         sha256=hashlib.sha256(data).hexdigest(),
         page_title=title,
         final_url=final_url,
+        metrics=metrics,
     )

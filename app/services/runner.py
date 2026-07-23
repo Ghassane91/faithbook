@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -264,6 +265,10 @@ async def _attempt_once(
     run.content_sha256 = result.sha256
     run.page_title = result.page_title
     run.final_url = result.final_url
+    if result.metrics:
+        run.metrics = json.dumps(result.metrics)
+        libelle = ", ".join(f"{k}={v}" for k, v in result.metrics.items())
+        log_step(session, run, "metrics", f"Métriques relevées : {libelle}", attempt=attempt)
     session.commit()
     log_step(
         session,

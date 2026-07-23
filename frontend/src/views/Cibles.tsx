@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { StatsCible } from '../components/StatsCible'
 import { TargetForm } from '../components/TargetForm'
 import { dateHeure, delai, STATUS_LABEL, useData } from '../lib'
 import type { Target } from '../types'
@@ -11,6 +12,7 @@ interface Props {
 export function Cibles({ onOuvrirRun }: Props) {
   const { data: cibles, erreur, chargement, recharger } = useData(() => api.targets(), [], 20000)
   const [edition, setEdition] = useState<Target | null | undefined>(undefined)
+  const [stats, setStats] = useState<Target | null>(null)
   const [message, setMessage] = useState<{ texte: string; type: 'info' | 'error' } | null>(null)
   const [occupe, setOccupe] = useState<number | null>(null)
 
@@ -135,6 +137,9 @@ export function Cibles({ onOuvrirRun }: Props) {
                       <button className="btn ghost sm" onClick={() => lancer(c, true)} title="Ignorer la déduplication">
                         Forcer
                       </button>
+                      <button className="btn ghost sm" onClick={() => setStats(c)} title="Évolution des abonnés / mentions J’aime">
+                        Stats
+                      </button>
                       <button className="btn ghost sm" onClick={() => setEdition(c)}>
                         Modifier
                       </button>
@@ -152,6 +157,9 @@ export function Cibles({ onOuvrirRun }: Props) {
 
       {edition !== undefined && (
         <TargetForm cible={edition} onClose={() => setEdition(undefined)} onSaved={recharger} />
+      )}
+      {stats && (
+        <StatsCible targetId={stats.id} nom={stats.name} onClose={() => setStats(null)} />
       )}
     </>
   )
