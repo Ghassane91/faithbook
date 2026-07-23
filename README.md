@@ -213,7 +213,7 @@ la date et l'heure de capture, et le dossier du site est réutilisé, jamais rec
 
 ---
 
-## 5. Réessais
+## 5. Réessais, alertes et rapport quotidien
 
 `MAX_ATTEMPTS=3` et `RETRY_BACKOFF_SECONDS=15` → tentatives à T, T+15 s, T+45 s.
 Chaque tentative est journalisée dans `run_logs`. Après épuisement, l'exécution
@@ -221,6 +221,27 @@ passe en `failed` avec le message d'erreur conservé.
 
 Les exécutions restées `running` après un arrêt brutal du conteneur sont
 marquées en échec au redémarrage (pas d'exécution « fantôme »).
+
+### La plateforme vous prévient — plus de surveillance manuelle
+
+Trois automatismes (mails envoyés via le bloc `SMTP_*` du §8 ; sans SMTP, le
+contenu est journalisé) :
+
+| Automatisme | Quand | Variable |
+|---|---|---|
+| **Alerte d'échec** | Immédiatement quand une capture échoue après tous les réessais — cible, erreur en clair, lien vers l'historique | `NOTIFY_ON_FAILURE=true` |
+| **Contrôle des sessions** | Chaque jour : chaque compte connecté est testé en arrière-plan ; mail **uniquement si** une session est expirée / demande une vérification | `SESSION_CHECK_TIME=07:30` |
+| **Rapport quotidien** | Un seul mail le matin : captures d'hier (réussites, échecs et leurs raisons), état des comptes, cibles actives | `DAILY_REPORT_TIME=08:00` |
+
+Destinataire : `NOTIFY_EMAIL`, à défaut l'adresse du premier utilisateur.
+Un horaire vide désactive la tâche.
+
+### Nettoyage automatique
+
+Chaque nuit (3 h 30), les exécutions **et les fichiers locaux** plus vieux que
+`RUN_RETENTION_DAYS` (90 j par défaut) sont supprimés, dossiers vides compris.
+La copie déjà synchronisée sur Google Drive n'est pas touchée : elle sert
+d'archive longue durée.
 
 ---
 

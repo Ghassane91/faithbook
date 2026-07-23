@@ -74,6 +74,16 @@ class Settings(BaseSettings):
     # Format du nom des dossiers dates, en local comme sur Drive.
     folder_date_format: str = "%Y-%m-%d"
 
+    # Notifications (les mails partent via le bloc SMTP_* ; sans SMTP ils sont
+    # journalises). Destinataire : NOTIFY_EMAIL, a defaut le premier utilisateur.
+    notify_email: str = ""
+    # Mail immediat quand une capture echoue apres tous les reessais.
+    notify_on_failure: bool = True
+    # Rapport quotidien recapitulatif (HH:MM, vide = desactive).
+    daily_report_time: str = "08:00"
+    # Verification quotidienne des sessions des comptes connectes (HH:MM, vide = desactive).
+    session_check_time: str = "07:30"
+
     # Capture
     default_viewport_width: int = 1440
     default_viewport_height: int = 900

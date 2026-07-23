@@ -20,6 +20,7 @@ from app.services.capture import (
     slugify,
 )
 from app.services.drive import DriveNotConfigured, drive_client
+from app.services.notify import notify_failure
 from app.services.session_check import encrypted_state_to_storage
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,8 @@ async def execute_run(run_id: int, force: bool = False) -> None:
                 f"Abandon apres {settings.max_attempts} tentatives",
                 level="ERROR",
             )
+            # Alerte immediate : l'echec ne doit pas passer inapercu.
+            notify_failure(target, run)
 
 
 def _elapsed_ms(run: Run) -> int:

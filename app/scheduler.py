@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -11,6 +13,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import session_scope
 from app.models import Run, RunStatus, Target, TriggerType
+from app.services import notify
 from app.services.runner import trigger_target
 
 logger = logging.getLogger(__name__)
@@ -19,6 +22,8 @@ scheduler = AsyncIOScheduler(timezone=settings.timezone)
 
 JOB_PREFIX = "target-"
 PURGE_JOB_ID = "purge-old-runs"
+SESSION_CHECK_JOB_ID = "session-check"
+DAILY_REPORT_JOB_ID = "daily-report"
 
 
 def job_id_for(target_id: int) -> str:
@@ -87,6 +92,60 @@ def _purge_old_runs() -> None:
             session.delete(run)
         if old:
             logger.info("Purge : %s executions supprimees", len(old))
+    _purge_old_files()
+
+
+def _purge_old_files() -> None:
+    """Supprime les captures locales plus vieilles que la retention.
+
+    Uniquement le disque local : la copie deja synchronisee sur Google Drive
+    n'est pas touchee (robocopy est additif), elle sert d'archive longue duree.
+    """
+    root = Path(settings.screenshot_dir)
+    if settings.run_retention_days <= 0 or not root.is_dir():
+        return
+    cutoff_ts = time.time() - settings.run_retention_days * 86400
+    removed = 0
+    for f in root.rglob("*"):
+        if f.is_file() and f.stat().st_mtime < cutoff_ts:
+            f.unlink(missing_ok=True)
+            removed += 1
+    # Retire les dossiers de site devenus vides.
+    for d in sorted((p for p in root.rglob("*") if p.is_dir()), reverse=True):
+        try:
+            d.rmdir()  # ne supprime que si vide
+        except OSError:
+            pass
+    if removed:
+        logger.info("Purge fichiers : %s capture(s) locale(s) supprimee(s)", removed)
+
+
+async def _session_check_job() -> None:
+    try:
+        await notify.check_all_sessions()
+    except Exception:
+        logger.exception("Verification des sessions en erreur")
+
+
+def _daily_report_job() -> None:
+    try:
+        notify.daily_report()
+    except Exception:
+        logger.exception("Rapport quotidien en erreur")
+
+
+def _cron_at(hhmm: str) -> CronTrigger | None:
+    """Trigger quotidien depuis 'HH:MM', None si vide ou invalide."""
+    hhmm = (hhmm or "").strip()
+    if not hhmm:
+        return None
+    try:
+        hour, minute = hhmm.split(":")
+        return CronTrigger(hour=int(hour), minute=int(minute),
+                           timezone=ZoneInfo(settings.timezone))
+    except (ValueError, TypeError):
+        logger.warning("Horaire invalide '%s' (attendu HH:MM) : tache desactivee", hhmm)
+        return None
 
 
 def load_all_targets() -> int:
@@ -110,6 +169,22 @@ def start_scheduler() -> None:
         id=PURGE_JOB_ID,
         replace_existing=True,
     )
+    # Controle quotidien des sessions des comptes connectes (alerte si souci).
+    trig = _cron_at(settings.session_check_time)
+    if trig:
+        scheduler.add_job(
+            _session_check_job, trigger=trig, id=SESSION_CHECK_JOB_ID,
+            replace_existing=True, misfire_grace_time=3600, coalesce=True,
+        )
+        logger.info("Controle des sessions planifie a %s", settings.session_check_time)
+    # Rapport quotidien recapitulatif.
+    trig = _cron_at(settings.daily_report_time)
+    if trig:
+        scheduler.add_job(
+            _daily_report_job, trigger=trig, id=DAILY_REPORT_JOB_ID,
+            replace_existing=True, misfire_grace_time=3600, coalesce=True,
+        )
+        logger.info("Rapport quotidien planifie a %s", settings.daily_report_time)
     count = load_all_targets()
     logger.info("Planificateur demarre (%s cibles, fuseau %s)", count, settings.timezone)
 
