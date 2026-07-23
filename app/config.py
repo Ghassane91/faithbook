@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     vnc_password: str = ""
     novnc_port: int = 6080
     login_timeout_minutes: int = 15
+    # Duree de vie du jeton qui autorise l'acces a /novnc et /websockify (courte
+    # et independante de login_timeout_minutes : la fenetre d'exposition doit
+    # rester minimale meme si la connexion manuelle elle-meme dure plus longtemps).
+    novnc_token_ttl_minutes: int = 10
 
     # Anti-SSRF
     # Liste blanche de domaines autorises (vide = tout sauf les cibles internes).

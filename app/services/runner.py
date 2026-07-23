@@ -24,6 +24,7 @@ from app.services.capture import (
 from app.services.drive import DriveNotConfigured, drive_client
 from app.services.notify import notify_change, notify_failure
 from app.services.session_check import encrypted_state_to_storage
+from app.services.ssrf import UrlRejected
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,16 @@ async def execute_run(run_id: int, force: bool = False) -> None:
                     )
                     session.commit()
                     log_step(session, run, "dedupe", str(exc), attempt=attempt)
+                    return
+                except UrlRejected as exc:
+                    # Condition permanente (SSRF) : reessayer ne changerait rien.
+                    run.status = RunStatus.failed
+                    run.error_message = f"URL refusee : {exc}"
+                    run.finished_at = utcnow()
+                    run.duration_ms = _elapsed_ms(run)
+                    session.commit()
+                    log_step(session, run, "failed", run.error_message, level="ERROR", attempt=attempt)
+                    notify_failure(target, run)
                     return
                 except Exception as exc:  # noqa: BLE001 - on journalise tout
                     last_error = exc

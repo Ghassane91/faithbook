@@ -15,7 +15,7 @@ from app.schemas import (
     ResetPasswordIn,
     UserOut,
 )
-from app.services import auth, mailer
+from app.services import audit, auth, mailer
 
 router = APIRouter(prefix="/api/auth", tags=["Authentification"])
 
@@ -53,18 +53,34 @@ def login(
     # Message identique dans les deux cas : ne pas reveler quels comptes existent.
     if user is None or not user.is_active or not auth.verify_password(payload.password, user.password_hash):
         auth.noter_echec(cle)
+        # `email` est un identifiant, jamais un secret : voir la regle de audit.record.
+        audit.record(session, "auth.login_failed", user=None, detail=f"email={email}", ip=ip)
         raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect.")
 
     auth.reinitialiser_tentatives(cle)
     token, _ = auth.create_session(session, user, request.headers.get("user-agent"), ip)
     _pose_cookie(response, token)
+    audit.record(session, "auth.login", user=user, ip=ip)
     return UserOut.model_validate(user)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, summary="Se déconnecter")
 def logout(request: Request, response: Response, session: Session = Depends(get_session)):
-    auth.revoke_session(session, request.cookies.get(auth.COOKIE_NAME))
+    token = request.cookies.get(auth.COOKIE_NAME)
+    # Resout l'utilisateur AVANT de revoquer : apres, le jeton n'identifie plus personne.
+    user = auth.resolve_session(session, token)
+    auth.revoke_session(session, token)
     response.delete_cookie(auth.COOKIE_NAME, path="/")
+    if user is not None:
+        audit.record(
+            session, "auth.logout", user=user, ip=request.client.host if request.client else None
+        )
+
+
+@router.get("/check", include_in_schema=False, status_code=status.HTTP_204_NO_CONTENT)
+def check(user: User = Depends(current_user)):
+    """Verifie une session valide (ou une cle API) : utilise par nginx pour
+    proteger /docs, /redoc et /openapi.json derriere une connexion."""
 
 
 @router.get("/me", response_model=UserOut, summary="Compte connecté")
@@ -102,6 +118,10 @@ def change_password(
         session, frais, request.headers.get("user-agent"), request.client.host if request.client else None
     )
     _pose_cookie(response, token)
+    audit.record(
+        session, "auth.password_change", user=frais,
+        ip=request.client.host if request.client else None,
+    )
     return UserOut.model_validate(frais)
 
 
@@ -131,6 +151,7 @@ def forgot_password(
     user = session.scalars(select(User).where(User.email == email)).first()
     # Reponse identique que le compte existe ou non : on ne revele rien.
     if user is not None and user.is_active:
+        audit.record(session, "auth.password_forgot", user=user, ip=ip)
         token = auth.create_reset_token(session, user)
         lien = f"{settings.public_url.rstrip('/')}/?reset_token={token}"
         minutes = settings.reset_token_minutes
@@ -162,4 +183,8 @@ def reset_password(
             status_code=400,
             detail="Lien invalide ou expiré. Demandez-en un nouveau.",
         )
+    audit.record(
+        session, "auth.password_reset", user=user,
+        ip=request.client.host if request.client else None,
+    )
     return {"detail": "Mot de passe réinitialisé. Vous pouvez maintenant vous connecter."}

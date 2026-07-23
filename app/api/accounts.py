@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,21 @@ router = APIRouter(
 )
 
 NOVNC_PATH = "/novnc/vnc.html?autoconnect=true&resize=remote&reconnect=true"
+# Cookie qui porte le jeton noVNC : lu par nginx (auth_request) sur /novnc/ et
+# /websockify, jamais par le JavaScript du frontend.
+NOVNC_COOKIE = "faithbook_novnc"
+
+
+def _pose_novnc_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=NOVNC_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        max_age=settings.novnc_token_ttl_minutes * 60,
+        path="/",
+    )
 
 
 def _owned(session: Session, account_id: int, user: User) -> Account:
@@ -113,16 +128,21 @@ async def delete_account(
 async def login_start(
     account_id: int,
     request: Request,
+    response: Response,
     user: User = Depends(current_user),
     session: Session = Depends(get_session),
 ):
     account = _owned(session, account_id, user)
     try:
-        await login_manager.start(account_id, account.profile_slug, account.platform)
+        token = await login_manager.start(account_id, account.profile_slug, account.platform, user.id)
     except LoginBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Ouverture impossible : {exc}") from None
+
+    # Le navigateur de connexion (noVNC) n'est accessible qu'avec ce jeton :
+    # sans lui, /novnc/ et /websockify renvoient 403 (voir nginx.conf).
+    _pose_novnc_cookie(response, token)
 
     audit.record(
         session, "account.login_start", user=user, detail=f"compte #{account_id}",
@@ -159,6 +179,7 @@ async def login_status(account_id: int, user: User = Depends(current_user)):
 async def login_finish(
     account_id: int,
     request: Request,
+    response: Response,
     user: User = Depends(current_user),
     session: Session = Depends(get_session),
 ):
@@ -167,6 +188,10 @@ async def login_finish(
         result = await login_manager.finish(account_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    finally:
+        # La connexion est terminee (succes ou echec) : le navigateur noVNC ne
+        # doit plus etre atteignable.
+        response.delete_cookie(NOVNC_COOKIE, path="/")
 
     if result["logged_in"]:
         account.encrypted_state = result["encrypted_state"]
@@ -194,8 +219,34 @@ async def login_finish(
     "/{account_id}/login/cancel", status_code=status.HTTP_204_NO_CONTENT,
     summary="Abandonner la connexion manuelle",
 )
-async def login_cancel(account_id: int, user: User = Depends(current_user)):
+async def login_cancel(
+    account_id: int,
+    request: Request,
+    response: Response,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
     await login_manager.cancel(account_id)
+    response.delete_cookie(NOVNC_COOKIE, path="/")
+    audit.record(
+        session, "account.login_cancel", user=user, detail=f"compte #{account_id}",
+        ip=request.client.host if request.client else None,
+    )
+
+
+# --- Autorisation noVNC (appelee par nginx via auth_request, jamais par le
+# frontend) ------------------------------------------------------------------
+@router.get(
+    "/novnc/authorize", include_in_schema=False, status_code=status.HTTP_204_NO_CONTENT,
+)
+def novnc_authorize(request: Request, user: User = Depends(current_user)):
+    """Verifie le jeton noVNC (cookie) avant que nginx ne relaie vers l'ecran.
+
+    Ne journalise jamais le contenu du cookie : uniquement l'issue.
+    """
+    token = request.cookies.get(NOVNC_COOKIE)
+    if not login_manager.authorize(token, user.id):
+        raise HTTPException(status_code=403, detail="Acces noVNC refuse.")
 
 
 # --- Test de session ------------------------------------------------------

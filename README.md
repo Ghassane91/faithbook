@@ -16,6 +16,28 @@ VPS ne demande aucune modification de code**, uniquement un `.env` différent.
 
 ---
 
+## 0. Feuille de route vers un SaaS commercial
+
+FaithBook évolue par phases vers une plateforme multi-organisation. Chaque
+phase livre un commit propre, ses tests, et cette section a jour.
+
+| Phase | Contenu | État |
+|---|---|---|
+| 0 | Audit (architecture, risques, dépendances Windows, plan) | ✅ Fait |
+| 1a | **Sécurité immédiate** : SSRF branché, jeton noVNC + isolation entre utilisateurs, `/docs` protégé, chiffrement du `storage_state_json` legacy, audit élargi | ✅ Fait — voir §8, §10, §11 |
+| 1b | Sessions robustes : rescellement des cookies après capture, statuts `suspended`/`disconnected`, alerte pré-expiration | ⏳ À faire |
+| 1c | Ops : `depends_on` healthy, sauvegarde/restauration, CI locale | ⏳ À faire |
+| 2 | Multi-tenant (organisations, rôles, invitations), file d'exécution (Redis + workers), PostgreSQL par défaut en SaaS | ⏳ À faire |
+| 3 | Abstraction de stockage (local / S3 / Drive API), quotas, URLs signées | ⏳ À faire |
+| 4–8 | Comparaison avancée, analyse de contenu (IA optionnelle), alertes multi-canaux, gestion de cibles avancée, quotas/plans | ⏳ À faire |
+
+Le développement continue **en local** ; le passage sur VPS (§13) n'aura lieu
+qu'une fois la plateforme validée. Aucune facturation réelle n'est développée
+pour l'instant (plans configurables sans paiement, voir la feuille de route
+complète discutée hors README).
+
+---
+
 ## 1. Démarrage rapide
 
 ```bash
@@ -287,6 +309,11 @@ Ces routes couvrent déjà tous les besoins du frontend de la Phase 2
 (gestion des URL, horaires, historique, captures, erreurs) ainsi que les comptes
 connectés et la réinitialisation de mot de passe.
 
+> Deux routes internes supplémentaires (absentes de `/docs`, jamais destinées
+> à être appelées directement) : `GET /api/auth/check` et
+> `GET /api/accounts/novnc/authorize`. Elles ne servent qu'au relais nginx
+> (`auth_request`) qui protège `/docs` et l'écran noVNC — voir §8 et §10.
+
 ### Options avancées d'une cible
 
 `viewport_width/height`, `full_page`, `wait_until`, `wait_after_load_ms`,
@@ -363,6 +390,9 @@ mot de passe oublié (`/api/auth/forgot`, `/api/auth/reset`).
 | Changement de mot de passe | Révoque toutes les autres sessions. Imposé tant que le mot de passe généré n'a pas été changé. |
 | Mot de passe oublié | Lien de réinitialisation **à usage unique et daté** (voir ci-dessous), envoyé par mail. Seule l'empreinte du jeton est stockée. |
 | Clé API | `API_KEY` donne un accès machine-à-machine à l'API (scripts, CI), **sans compte**. Sans rapport avec les comptes utilisateurs. |
+| Anti-SSRF | Toute URL de cible est validée (`app/services/ssrf.py`) **à la création/modification** *et* **juste avant chaque capture** (protège d'un DNS qui changerait entre-temps) : rejette boucle locale, réseaux privés, lien-local (metadata cloud `169.254.169.254`), suffixes `.local`/`.internal`. Liste blanche de domaines optionnelle (`ALLOWED_DOMAINS`). |
+| Documentation API | `/docs`, `/redoc`, `/openapi.json` exigent une session (ou `X-Api-Key`) via le relais nginx — ils ne divulguent plus le schéma complet à un visiteur anonyme. |
+| Audit | Connexion/déconnexion (succès **et échec**), changement/réinitialisation de mot de passe, création/modification/suppression de cible, et toutes les actions sur les comptes connectés sont journalisées dans `audit_log` (jamais de secret dans le détail). |
 
 Routes : `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`,
 `POST /api/auth/password`, `POST /api/auth/forgot`, `POST /api/auth/reset`.
@@ -498,8 +528,16 @@ qui lui sont liées. Le parcours :
 Sécurité : aucun mot de passe n'est lu ni stocké. La clé de chiffrement vient de
 `SESSION_ENCRYPTION_KEY` (ou d'un fichier `data/.session_key` généré au premier
 démarrage — **à déplacer en variable d'environnement en production**, sinon les
-sessions chiffrées deviennent illisibles si le fichier est perdu). L'écran noVNC
-n'est accessible qu'à travers le proxy authentifié du frontend.
+sessions chiffrées deviennent illisibles si le fichier est perdu).
+
+> **Écran noVNC protégé par un jeton à usage court (Phase 1a).** `/novnc/` et
+> `/websockify` sont gardés par nginx (`auth_request`) : l'accès exige (1) une
+> session FaithBook valide **et** (2) un jeton à usage court posé en cookie
+> `HttpOnly` par `POST /login/start`, régénéré à chaque connexion et invalidé
+> à la fin (`login/finish`/`login/cancel`) ou après `NOVNC_TOKEN_TTL_MINUTES`
+> (10 min par défaut). Le jeton est en plus lié à l'utilisateur qui a démarré
+> la connexion : **un autre utilisateur, même en possession du jeton, ne peut
+> pas rejoindre l'écran** — vérifié par `tests/test_api_security.py`.
 
 > **Prérequis infra** : la connexion manuelle affiche un vrai navigateur sur un
 > écran virtuel (`Xvfb`) exposé via noVNC. Tout est intégré à l'image Docker
@@ -519,7 +557,10 @@ curl http://localhost:8020/api/targets/1/session    # etat + date d'expiration
 `session_profile` crée un profil Chromium persistant dans `data/profiles/` : les
 cookies rafraîchis par Facebook y sont conservés d'une exécution à l'autre. Si
 une cible a **à la fois** un compte connecté et un `session_profile`, le **compte
-connecté est prioritaire**.
+connecté est prioritaire**. Le `storage_state_json` de la cible est **chiffré
+au repos** (Fernet, même clé que les comptes connectés) : une migration
+(`b3d4e5f6a7c8`) a chiffré les valeurs existantes, et l'API chiffre désormais
+toute nouvelle valeur écrite via `PUT /api/targets/{id}/session`.
 
 ### Points de vigilance à connaître
 
@@ -543,13 +584,38 @@ connecté est prioritaire**.
 
 ## 11. Tests
 
+### Suite pytest (unitaire + intégration)
+
 ```bash
-bash scripts/run_tests.sh 8020 3000
+docker compose exec backend python -m pytest tests/ -v
+```
+
+| Fichier | Couvre |
+|---|---|
+| `tests/test_ssrf.py` | Anti-SSRF : boucle locale, réseaux privés, metadata cloud, `.internal`/`.local`, liste blanche, `ALLOW_PRIVATE_TARGETS` |
+| `tests/test_crypto.py` | Chiffrement Fernet (roundtrip, donnée corrompue), coffre de profil (`open_profile`/`seal_profile`) |
+| `tests/test_session_state.py` | Déchiffrement transparent du `storage_state_json` (valeur chiffrée, repli legacy en clair, donnée illisible) |
+| `tests/test_login_authorize.py` | `LoginManager.authorize()` : jeton correct/incorrect, expiré, isolation entre utilisateurs |
+| `tests/test_audit.py` | Le journal d'audit écrit et relit correctement, sans fuite quand `user=None` |
+| `tests/test_api_security.py` | Intégration FastAPI `TestClient` : SSRF à la création/modification de cible, gate `/api/auth/check`, gate `/api/accounts/novnc/authorize` (y compris **isolation entre deux utilisateurs réels**), audit d'un échec de connexion |
+
+`tests/conftest.py` isole totalement les tests de la base et des fichiers
+réels du conteneur (base SQLite temporaire, clé de chiffrement générée,
+dossiers de travail à part) — aucun risque pour les données de production.
+Le relais nginx lui-même (`auth_request`) n'est pas rejouable en pytest (pas
+de nginx dans ces tests) ; il a été vérifié manuellement de bout en bout
+(session absente → `401`, session sans jeton → `403`, session + jeton → `200`
+puis handshake WebSocket `101`).
+
+### Smoke test (bout en bout, conteneurs réels)
+
+```bash
+API_KEY=... bash scripts/run_tests.sh 8020 3000   # ou SMOKE_PASSWORD=...
 ```
 
 | Suite | Couvre |
 |---|---|
-| `scripts/smoke_test.py` | API réelle : création de cible, planification, capture, dossier daté, PNG, doublon, `force=true`, échec après 3 tentatives |
+| `scripts/smoke_test.py` | API réelle : création de cible, planification, capture, dossier par site, PNG, doublon, `force=true`, échec après 3 tentatives (URL réelle à port fermé, pour ne pas être intercepté plus tôt par le garde anti-SSRF) |
 | Vérifs interface | Page servie, relais `/api` par nginx, route profonde (`/historique`) |
 
 Les tests de l'intégration Drive sont dans [tests/suspendu/](tests/suspendu/) et

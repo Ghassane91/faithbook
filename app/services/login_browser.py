@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from playwright.async_api import BrowserContext, Playwright, async_playwright
@@ -30,7 +31,17 @@ class LoginSession:
     work_dir: Path
     pw: Playwright
     context: BrowserContext
+    # Utilisateur FaithBook qui a ouvert cette connexion : seul lui peut voir
+    # ou piloter l'ecran noVNC associe (empeche l'acces croise entre comptes).
+    started_by_user_id: int
+    # Jeton opaque exige par le proxy (nginx auth_request) pour atteindre
+    # /novnc et /websockify ; regenere a chaque connexion, jamais journalise.
+    token: str
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    token_expires_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+        + timedelta(minutes=settings.novnc_token_ttl_minutes)
+    )
 
 
 class LoginBusy(RuntimeError):
@@ -64,7 +75,8 @@ class LoginManager:
             "started_at": self._active.started_at.isoformat(),
         }
 
-    async def start(self, account_id: int, profile_slug: str, platform: str) -> None:
+    async def start(self, account_id: int, profile_slug: str, platform: str, started_by_user_id: int) -> str:
+        """Ouvre le navigateur de connexion et retourne le jeton d'acces noVNC."""
         async with self._lock:
             if self._active is not None:
                 raise LoginBusy(
@@ -90,6 +102,7 @@ class LoginManager:
                 crypto.discard_profile(work_dir)
                 raise
 
+            token = secrets.token_urlsafe(32)
             self._active = LoginSession(
                 account_id=account_id,
                 profile_slug=profile_slug,
@@ -97,11 +110,30 @@ class LoginManager:
                 work_dir=work_dir,
                 pw=pw,
                 context=context,
+                started_by_user_id=started_by_user_id,
+                token=token,
             )
             logger.info("Connexion manuelle demarree pour le compte %s", account_id)
 
         # Filet de securite : ferme et abandonne apres le delai configure.
         self._timeout_task = asyncio.create_task(self._auto_cancel(account_id))
+        return token
+
+    def authorize(self, token: str | None, user_id: int) -> bool:
+        """Le proxy noVNC (nginx auth_request) exige cette autorisation.
+
+        Vraie seulement si une connexion est active, que le jeton correspond
+        exactement, qu'il n'a pas expire, et que l'appelant est l'utilisateur
+        qui a demarre cette connexion (isolation entre utilisateurs).
+        """
+        sess = self._active
+        if sess is None or not token:
+            return False
+        if not secrets.compare_digest(token, sess.token):
+            return False
+        if datetime.now(timezone.utc) >= sess.token_expires_at:
+            return False
+        return sess.started_by_user_id == user_id
 
     async def _auto_cancel(self, account_id: int) -> None:
         await asyncio.sleep(settings.login_timeout_minutes * 60)

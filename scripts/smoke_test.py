@@ -104,12 +104,15 @@ def main() -> int:
     print(f"[8] force=true       : run #{forced['run_id']} {forced['status']}")
     assert forced["status"] == "pending"
 
-    # Retry : une URL invalide doit echouer proprement apres plusieurs tentatives
+    # Retry : une URL qui echoue TOUJOURS a la capture doit echouer proprement
+    # apres plusieurs tentatives. Domaine reel (passe le garde anti-SSRF, actif
+    # depuis la Phase 1a), port ferme (echec de connexion garanti a l'ouverture
+    # de la page) : on teste le mecanisme de reessai, pas la resolution DNS.
     bad = client.post(
         "/api/targets",
         json={
-            "name": "Smoke test URL invalide",
-            "url": "https://domaine-qui-nexiste-pas-12345.invalid",
+            "name": "Smoke test port ferme",
+            "url": "https://example.com:8443/",
             "run_time": "23:58",
             "timeout_ms": 5000,
         },

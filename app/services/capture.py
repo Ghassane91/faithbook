@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright
 
 from app.config import settings
 from app.models import Target
+from app.services import session_state, ssrf
 from app.services.metrics import parse_page_metrics
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,11 @@ async def capture_page(
     S'il est fourni, la page est capturée **en étant connecté** via ce compte —
     prioritaire sur `session_profile` / `storage_state_json` de la cible.
     """
+    # Anti-SSRF : revalide juste avant la navigation (et pas seulement a la
+    # creation de la cible), au cas ou le DNS aurait change depuis (rebinding).
+    # check_url() fait une resolution DNS bloquante : a lancer hors event loop.
+    await asyncio.to_thread(ssrf.check_url, target.url)
+
     width = target.viewport_width or settings.default_viewport_width
     height = target.viewport_height or settings.default_viewport_height
     timeout = target.timeout_ms or settings.default_timeout_ms
@@ -194,13 +200,15 @@ async def capture_page(
                 user_data_dir=str(udd), args=launch_args, **context_kwargs
             )
             if is_new_profile and target.storage_state_json:
-                state = json.loads(target.storage_state_json)
-                if state.get("cookies"):
+                state = session_state.parse_state(target.storage_state_json)
+                if state and state.get("cookies"):
                     await context.add_cookies(state["cookies"])
         else:
             browser = await pw.chromium.launch(args=launch_args)
             if target.storage_state_json:
-                context_kwargs["storage_state"] = json.loads(target.storage_state_json)
+                state = session_state.parse_state(target.storage_state_json)
+                if state:
+                    context_kwargs["storage_state"] = state
             context = await browser.new_context(**context_kwargs)
 
         context.set_default_timeout(timeout)

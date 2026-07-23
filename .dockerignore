@@ -7,4 +7,4 @@ secrets/
 .env
 README.md
 docs/
-tests/
+tests/suspendu/__pycache__

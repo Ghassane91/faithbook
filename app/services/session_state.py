@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
+
+from app.services import crypto
+
+logger = logging.getLogger(__name__)
 
 # Cookies porteurs de la session Facebook : leur expiration determine la
 # duree de vie utile du storage_state.
@@ -9,10 +14,20 @@ FACEBOOK_SESSION_COOKIES = {"c_user", "xs"}
 
 
 def parse_state(raw: str | None) -> dict | None:
+    """Dechiffre puis parse le storage_state d'une cible.
+
+    Point de lecture unique : `raw` est chiffre (Fernet) depuis la migration
+    de securisation. Le repli sur `raw` en clair couvre une donnee legacy qui
+    aurait echappe a la migration (jamais produite par du code a jour).
+    """
     if not raw:
         return None
+    texte = crypto.decrypt_text(raw)
+    if texte is None:
+        logger.warning("storage_state_json non dechiffrable : utilise tel quel (legacy ?)")
+        texte = raw
     try:
-        return json.loads(raw)
+        return json.loads(texte)
     except json.JSONDecodeError:
         return None
 

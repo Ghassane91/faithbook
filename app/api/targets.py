@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.database import get_session
-from app.models import Run, RunStatus, Target, TriggerType
+from app.models import Run, RunStatus, Target, TriggerType, User
 from app.services.metrics import LABELS as METRIC_LABELS
 from app.scheduler import next_run_for, schedule_target, unschedule_target
 from app.schemas import (
@@ -20,8 +20,9 @@ from app.schemas import (
     TargetUpdate,
     TriggerRunResponse,
 )
-from app.services import session_state
+from app.services import audit, crypto, session_state
 from app.services.runner import trigger_target
+from app.services.ssrf import UrlRejected, check_url
 
 router = APIRouter(prefix="/api/targets", tags=["Cibles"], dependencies=[Depends(current_user)])
 
@@ -52,15 +53,32 @@ def list_targets(
     return [_to_out(session, t) for t in session.scalars(stmt).all()]
 
 
+def _check_target_url(url: str) -> None:
+    try:
+        check_url(url)
+    except UrlRejected as exc:
+        raise HTTPException(status_code=422, detail=f"URL refusee : {exc}") from None
+
+
 @router.post(
     "", response_model=TargetOut, status_code=status.HTTP_201_CREATED, summary="Creer une cible"
 )
-def create_target(payload: TargetCreate, session: Session = Depends(get_session)):
+def create_target(
+    payload: TargetCreate,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
+    _check_target_url(payload.url)
     target = Target(**payload.model_dump())
     session.add(target)
     session.commit()
     session.refresh(target)
     schedule_target(target)
+    audit.record(
+        session, "target.create", user=user, detail=f"cible #{target.id} {target.name}",
+        ip=request.client.host if request.client else None,
+    )
     return _to_out(session, target)
 
 
@@ -74,13 +92,20 @@ def get_target(target_id: int, session: Session = Depends(get_session)):
 
 @router.patch("/{target_id}", response_model=TargetOut, summary="Modifier une cible")
 def update_target(
-    target_id: int, payload: TargetUpdate, session: Session = Depends(get_session)
+    target_id: int,
+    payload: TargetUpdate,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
 ):
     target = session.get(Target, target_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Cible introuvable")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if "url" in changes:
+        _check_target_url(changes["url"])
+    for field, value in changes.items():
         setattr(target, field, value)
 
     if target.enabled and not (target.run_time or target.cron_expression):
@@ -91,17 +116,30 @@ def update_target(
     session.commit()
     session.refresh(target)
     schedule_target(target)
+    audit.record(
+        session, "target.update", user=user, detail=f"cible #{target.id} {target.name}",
+        ip=request.client.host if request.client else None,
+    )
     return _to_out(session, target)
 
 
 @router.delete(
     "/{target_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Supprimer une cible"
 )
-def delete_target(target_id: int, session: Session = Depends(get_session)):
+def delete_target(
+    target_id: int,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
     target = session.get(Target, target_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Cible introuvable")
     unschedule_target(target_id)
+    audit.record(
+        session, "target.delete", user=user, detail=f"cible #{target_id} {target.name}",
+        ip=request.client.host if request.client else None,
+    )
     session.delete(target)
     session.commit()
 
@@ -135,19 +173,28 @@ async def run_now(
     response_model=SessionStatusOut,
     summary="Enregistrer la session (cookies) d'une cible",
 )
-def set_session(target_id: int, payload: SessionIn, session: Session = Depends(get_session)):
+def set_session(
+    target_id: int,
+    payload: SessionIn,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
     """Enregistre un `storage_state` Playwright produit par `scripts/login_session.py`.
 
     Aucun identifiant n'est stocke : uniquement les cookies issus d'une connexion
-    que vous avez effectuee vous-meme dans un navigateur.
+    que vous avez effectuee vous-meme dans un navigateur. Chiffre au repos
+    (Fernet), au meme titre que les sessions des comptes connectes.
     """
-    import json
-
     target = session.get(Target, target_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Cible introuvable")
-    target.storage_state_json = json.dumps(payload.storage_state)
+    target.storage_state_json = crypto.encrypt_text(json.dumps(payload.storage_state))
     session.commit()
+    audit.record(
+        session, "target.session_set", user=user, detail=f"cible #{target_id} {target.name}",
+        ip=request.client.host if request.client else None,
+    )
     return _session_status(target)
 
 
@@ -168,12 +215,21 @@ def get_session_status(target_id: int, session: Session = Depends(get_session)):
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Supprimer la session enregistree",
 )
-def delete_session(target_id: int, session: Session = Depends(get_session)):
+def delete_session(
+    target_id: int,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+):
     target = session.get(Target, target_id)
     if target is None:
         raise HTTPException(status_code=404, detail="Cible introuvable")
     target.storage_state_json = None
     session.commit()
+    audit.record(
+        session, "target.session_delete", user=user, detail=f"cible #{target_id} {target.name}",
+        ip=request.client.host if request.client else None,
+    )
 
 
 def _session_status(target: Target) -> SessionStatusOut:

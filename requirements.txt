@@ -16,3 +16,5 @@ psycopg[binary]==3.2.3
 Pillow==11.0.0
 bcrypt==4.2.1
 cryptography>=41,<45
+pytest==8.3.4
+pytest-asyncio==0.25.2
