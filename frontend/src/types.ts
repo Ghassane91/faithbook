@@ -32,6 +32,7 @@ export interface Run extends RunSummary {
   content_sha256: string | null
   page_title: string | null
   final_url: string | null
+  previous_run_id: number | null
   logs: RunLog[]
 }
 

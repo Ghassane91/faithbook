@@ -47,7 +47,20 @@ def get_run(run_id: int, session: Session = Depends(get_session)):
     run = session.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Execution introuvable")
-    return RunOut.model_validate(run)
+    out = RunOut.model_validate(run)
+    # Capture reussie precedente de la meme cible (comparaison avant/apres).
+    prev = session.scalars(
+        select(Run)
+        .where(
+            Run.target_id == run.target_id,
+            Run.id < run.id,
+            Run.status == RunStatus.success,
+            Run.screenshot_path.is_not(None),
+        )
+        .order_by(Run.id.desc())
+    ).first()
+    out.previous_run_id = prev.id if prev else None
+    return out
 
 
 @router.get("/{run_id}/logs", response_model=list[RunLogOut], summary="Logs d'une execution")

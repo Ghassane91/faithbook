@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { dateHeure, duree, poids, resumeErreur, STATUS_LABEL, useData } from '../lib'
 import type { Run } from '../types'
+import { Comparaison } from './Comparaison'
 
 interface Props {
   runId: number
@@ -11,6 +12,7 @@ interface Props {
 export function RunDetail({ runId, onClose }: Props) {
   const enCours = (r: Run | null) => r?.status === 'pending' || r?.status === 'running'
   const { data: run, erreur } = useData<Run>(() => api.run(runId), [runId], 3000)
+  const [compare, setCompare] = useState(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -19,6 +21,7 @@ export function RunDetail({ runId, onClose }: Props) {
   }, [onClose])
 
   return (
+    <>
     <div className="overlay" onClick={onClose} role="presentation">
       <aside
         className="drawer"
@@ -81,6 +84,22 @@ export function RunDetail({ runId, onClose }: Props) {
                 <dd className="mono">{duree(run.duration_ms)}</dd>
                 <dt>tentatives</dt>
                 <dd className="mono">{run.attempts}</dd>
+                {run.change_ratio != null && (
+                  <>
+                    <dt>changement</dt>
+                    <dd>
+                      {run.changed ? (
+                        <span className="tag changed">
+                          modifiée · {Math.round(run.change_ratio * 100)} %
+                        </span>
+                      ) : (
+                        <span className="mono" style={{ color: 'var(--ink-faint)' }}>
+                          inchangée ({Math.round(run.change_ratio * 100)} %)
+                        </span>
+                      )}
+                    </dd>
+                  </>
+                )}
                 {run.final_url && (
                   <>
                     <dt>url finale</dt>
@@ -111,6 +130,11 @@ export function RunDetail({ runId, onClose }: Props) {
                 <h3>Capture</h3>
                 <img className="preview" src={api.screenshotUrl(run.id)} alt="Capture de la page" />
                 <div className="btn-row" style={{ marginTop: 10 }}>
+                  {run.previous_run_id && (
+                    <button className="btn sm" onClick={() => setCompare(true)}>
+                      Comparer avant / après
+                    </button>
+                  )}
                   <a className="btn ghost sm" href={api.screenshotUrl(run.id)} download>
                     Télécharger le PNG
                   </a>
@@ -148,5 +172,14 @@ export function RunDetail({ runId, onClose }: Props) {
         )}
       </aside>
     </div>
+    {compare && run?.previous_run_id != null && (
+      <Comparaison
+        beforeId={run.previous_run_id}
+        afterId={run.id}
+        changePct={run.change_ratio != null ? Math.round(run.change_ratio * 100) : null}
+        onClose={() => setCompare(false)}
+      />
+    )}
+    </>
   )
 }

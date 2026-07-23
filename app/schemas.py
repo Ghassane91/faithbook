@@ -287,6 +287,8 @@ class RunOut(RunSummary):
     content_sha256: str | None
     page_title: str | None
     final_url: str | None
+    # Capture réussie précédente de la même cible (pour la comparaison avant/après).
+    previous_run_id: int | None = None
     logs: list[RunLogOut] = []
 
 
