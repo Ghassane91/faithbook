@@ -121,7 +121,17 @@ if ($env:FAITHBOOK_TEST -eq '1') {
     exit 0
 }
 
-Set-Status 'Ouverture de FaithBook dans le navigateur…'
-Start-Process $AppUrl
+Set-Status 'Ouverture de FaithBook dans Chrome…'
+$chrome = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($chrome) {
+    # --new-window : ouvre FaithBook dans sa propre fenêtre Chrome.
+    Start-Process $chrome -ArgumentList '--new-window', $AppUrl
+} else {
+    Start-Process $AppUrl  # repli : navigateur par défaut
+}
 Start-Sleep -Milliseconds 1500
 $form.Close()
