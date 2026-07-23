@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     notify_email: str = ""
     # Mail immediat quand une capture echoue apres tous les reessais.
     notify_on_failure: bool = True
+    # Detection de changement : une capture est marquee « modifiee » si la part
+    # de la page qui change depasse ce seuil (0.03 = 3 %).
+    change_threshold: float = 0.03
+    # Mail quand une page suivie a change (opt-in, peut etre bavard).
+    notify_on_change: bool = False
     # Rapport quotidien recapitulatif (HH:MM, vide = desactive).
     daily_report_time: str = "08:00"
     # Verification quotidienne des sessions des comptes connectes (HH:MM, vide = desactive).

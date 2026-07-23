@@ -65,6 +65,50 @@ def thumb_path(screenshot: Path) -> Path:
     return screenshot.with_suffix(screenshot.suffix + THUMB_SUFFIX)
 
 
+# Seuil de différence par pixel (sur 255) au-delà duquel un pixel est « changé ».
+_PIXEL_DELTA = 24
+_DIFF_WIDTH = 400  # largeur normalisée pour comparer deux captures
+
+
+def image_change_ratio(before: Path, after: Path) -> float | None:
+    """Proportion (0..1) de la page qui a changé entre deux captures.
+
+    Robuste au reflow : les deux images sont ramenées à une largeur commune, et
+    l'on combine (a) la part de pixels différents sur la hauteur commune et
+    (b) l'écart de hauteur (une page qui s'allonge/raccourcit = un changement).
+    Retourne None si la comparaison est impossible.
+    """
+    try:
+        from PIL import Image, ImageChops
+
+        with Image.open(before) as ba, Image.open(after) as aa:
+            a = ba.convert("L")
+            b = aa.convert("L")
+
+            def norm(im: "Image.Image") -> "Image.Image":
+                h = max(1, round(im.height * _DIFF_WIDTH / im.width))
+                return im.resize((_DIFF_WIDTH, h))
+
+            a, b = norm(a), norm(b)
+            common_h = min(a.height, b.height)
+            ac = a.crop((0, 0, _DIFF_WIDTH, common_h))
+            bc = b.crop((0, 0, _DIFF_WIDTH, common_h))
+
+            diff = ImageChops.difference(ac, bc)
+            hist = diff.histogram()  # 256 niveaux
+            changed_px = sum(hist[_PIXEL_DELTA + 1 :])
+            total_px = _DIFF_WIDTH * common_h
+            pixel_ratio = changed_px / total_px if total_px else 0.0
+
+            hmax = max(a.height, b.height)
+            height_ratio = abs(a.height - b.height) / hmax if hmax else 0.0
+
+        return round(min(1.0, max(pixel_ratio, height_ratio)), 4)
+    except Exception:  # noqa: BLE001 - la comparaison est un confort, jamais bloquante
+        logger.warning("Comparaison d'images impossible (%s vs %s)", before, after, exc_info=True)
+        return None
+
+
 def make_thumbnail(screenshot: Path) -> Path | None:
     """Genere une vignette JPEG a cote de la capture.
 

@@ -220,6 +220,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tag.running,
 .tag.pending { background: var(--wait-wash); color: var(--wait); }
 .tag.off { background: var(--surface-sunk); color: var(--ink-faint); }
+.tag.changed { background: var(--cyan-wash); color: var(--cyan); font-weight: 600; }
+
+/* --- Badge « modifiée » sur une vignette de la planche ----------------- */
+.frame-window { position: relative; }
+.frame-changed {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: var(--cyan);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+}
 .tag.on { background: var(--cyan-wash); color: var(--cyan); }
 
 /* --- Bandeau de synthese --------------------------------------------- */

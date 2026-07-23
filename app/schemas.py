@@ -277,6 +277,8 @@ class RunSummary(BaseModel):
     attempts: int
     error_message: str | None
     skipped_reason: str | None
+    changed: bool | None = None
+    change_ratio: float | None = None
 
 
 class RunOut(RunSummary):

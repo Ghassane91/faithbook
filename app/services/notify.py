@@ -70,6 +70,22 @@ def notify_failure(target: Target, run: Run) -> None:
     _send(f"FaithBook — échec de capture : {target.name}", body)
 
 
+# --- 1bis. Alerte quand une page suivie a changé ---------------------------
+def notify_change(target: Target, run: Run, prev: Run) -> None:
+    pct = round((run.change_ratio or 0) * 100, 1)
+    lien = f"{settings.public_url.rstrip('/')}/#/historique"
+    body = (
+        f"La page suivie a changé depuis la dernière capture.\n\n"
+        f"Cible      : {target.name}\n"
+        f"Adresse    : {target.url}\n"
+        f"Changement : {pct} % de la page\n"
+        f"Date       : {run.capture_date}\n\n"
+        f"Comparez les captures (avant / après) dans l'historique :\n{lien}\n\n"
+        f"— FaithBook"
+    )
+    _send(f"FaithBook — « {target.name} » a changé ({pct} %)", body)
+
+
 # --- 2. Verification quotidienne des sessions ------------------------------
 async def check_all_sessions() -> None:
     """Teste chaque compte connecté et alerte si une session est à reconnecter.

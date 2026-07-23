@@ -243,6 +243,23 @@ Chaque nuit (3 h 30), les exécutions **et les fichiers locaux** plus vieux que
 La copie déjà synchronisée sur Google Drive n'est pas touchée : elle sert
 d'archive longue durée.
 
+### Détection de changement — de l'archivage à la veille
+
+À chaque capture réussie, FaithBook la compare à la **capture réussie
+précédente** de la même cible et calcule la **proportion de la page qui a
+changé** (diff de pixels normalisé, robuste au reflow ; combine les différences
+sur la zone commune et l'écart de hauteur).
+
+- Si le changement dépasse `CHANGE_THRESHOLD` (3 % par défaut), l'exécution est
+  marquée **« modifiée »** — badge visible sur la **Planche** (coin de la
+  vignette) et dans l'**Historique**, avec le pourcentage.
+- Avec `NOTIFY_ON_CHANGE=true`, un mail « la page X a changé » est envoyé (utile
+  pour surveiller une page sans ouvrir l'interface). Désactivé par défaut car
+  potentiellement bavard.
+
+C'est ce qui transforme FaithBook d'un archiveur en **outil de veille** : on ne
+regarde que ce qui a bougé.
+
 ---
 
 ## 6. API — résumé

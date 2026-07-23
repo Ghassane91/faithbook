@@ -15,12 +15,13 @@ from app.models import Account, Run, RunLog, RunStatus, Target, TriggerType, utc
 from app.services.capture import (
     build_filename,
     capture_page,
+    image_change_ratio,
     make_thumbnail,
     site_label,
     slugify,
 )
 from app.services.drive import DriveNotConfigured, drive_client
-from app.services.notify import notify_failure
+from app.services.notify import notify_change, notify_failure
 from app.services.session_check import encrypted_state_to_storage
 
 logger = logging.getLogger(__name__)
@@ -271,6 +272,36 @@ async def _attempt_once(
         f"Capture OK ({result.size_bytes} octets, sha256={result.sha256[:12]}...)",
         attempt=attempt,
     )
+
+    # --- 1bis. Détection de changement vs la capture réussie précédente ---
+    prev = session.scalars(
+        select(Run)
+        .where(
+            Run.target_id == target.id,
+            Run.id != run.id,
+            Run.status == RunStatus.success,
+            Run.screenshot_path.is_not(None),
+        )
+        .order_by(Run.id.desc())
+    ).first()
+    if prev and prev.screenshot_path and Path(prev.screenshot_path).exists():
+        ratio = await asyncio.to_thread(
+            image_change_ratio, Path(prev.screenshot_path), destination
+        )
+        if ratio is not None:
+            run.change_ratio = ratio
+            run.changed = ratio >= settings.change_threshold
+            session.commit()
+            pct = round(ratio * 100, 1)
+            if run.changed:
+                log_step(session, run, "diff",
+                         f"Page modifiée : {pct} % de changement depuis la capture précédente",
+                         attempt=attempt)
+                if settings.notify_on_change:
+                    notify_change(target, run, prev)
+            else:
+                log_step(session, run, "diff",
+                         f"Page inchangée ({pct} % de différence)", attempt=attempt)
 
     # --- 2. Deduplication par contenu ------------------------------------
     if not force and settings.dedupe_mode in ("content_hash", "both"):

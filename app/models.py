@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -274,6 +275,11 @@ class Run(Base):
     diagnostic_path: Mapped[str | None] = mapped_column(Text)
     # Statut de la session du compte au moment de l'execution.
     session_status: Mapped[str | None] = mapped_column(String(40))
+
+    # Detection de changement : proportion (0..1) de pixels differents par rapport
+    # a la capture reussie precedente, et le verdict booleen selon le seuil.
+    change_ratio: Mapped[float | None] = mapped_column(Float)
+    changed: Mapped[bool | None] = mapped_column(Boolean)
 
     target: Mapped[Target] = relationship(back_populates="runs")
     logs: Mapped[list[RunLog]] = relationship(

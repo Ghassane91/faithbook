@@ -164,6 +164,11 @@ function Cadre({
       aria-label={`${nom} — ${STATUS_LABEL[run.status]}`}
     >
       <div className="frame-window">
+        {aUneImage && run.changed && (
+          <span className="frame-changed" title={`Page modifiée : ${Math.round((run.change_ratio ?? 0) * 100)} % de changement`}>
+            ● modifiée
+          </span>
+        )}
         {aUneImage ? (
           <img src={api.thumbnailUrl(run.id)} alt={`Capture de ${nom}`} loading="lazy" decoding="async" />
         ) : (

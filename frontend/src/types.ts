@@ -13,6 +13,8 @@ export interface RunSummary {
   attempts: number
   error_message: string | null
   skipped_reason: string | null
+  changed: boolean | null
+  change_ratio: number | null
 }
 
 export interface RunLog {

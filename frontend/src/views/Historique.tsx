@@ -131,6 +131,13 @@ export function Historique({ onOuvrirRun }: Props) {
                     <td className="mono">{r.attempts}</td>
                     <td>
                       <span className={`tag ${r.status}`}>{STATUS_LABEL[r.status]}</span>
+                      {r.changed && (
+                        <div style={{ marginTop: 4 }}>
+                          <span className="tag changed" title="La page a changé depuis la capture précédente">
+                            modifiée {Math.round((r.change_ratio ?? 0) * 100)} %
+                          </span>
+                        </div>
+                      )}
                       {r.trigger === 'manual' && (
                         <div className="eyebrow" style={{ marginTop: 3 }}>
                           manuel
