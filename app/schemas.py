@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models import AccountStatus, CaptureMode, RunStatus, TriggerType
+from app.models import AccountStatus, CaptureMode, MembershipRole, RunStatus, TriggerType
 
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 WAIT_UNTIL = {"load", "domcontentloaded", "networkidle", "commit"}
@@ -63,6 +63,88 @@ class UserOut(BaseModel):
     last_login_at: datetime | None = None
 
 
+class OrganizationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+
+
+class OrganizationOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    role: MembershipRole
+    created_at: datetime
+    quota_accounts: int
+    quota_targets: int
+    quota_daily_captures: int
+    quota_storage_bytes: int
+    retention_days: int
+
+
+class QuotaMetricOut(BaseModel):
+    used: int
+    limit: int
+    remaining: int | None
+    percent: float | None
+    unlimited: bool
+
+
+class OrganizationUsageOut(BaseModel):
+    organization_id: int
+    billing_date: str
+    accounts: QuotaMetricOut
+    targets: QuotaMetricOut
+    daily_captures: QuotaMetricOut
+    storage_bytes: QuotaMetricOut
+    retention_days: int
+
+
+class OrganizationMemberOut(BaseModel):
+    membership_id: int
+    user_id: int
+    email: str
+    role: MembershipRole
+    created_at: datetime
+
+
+class OrganizationMemberAdd(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    role: MembershipRole = MembershipRole.member
+
+
+class OrganizationMemberUpdate(BaseModel):
+    role: MembershipRole
+
+
+class OrganizationInvitationCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    role: MembershipRole = MembershipRole.member
+
+
+class OrganizationInvitationOut(BaseModel):
+    id: int
+    email: str
+    role: MembershipRole
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+    delivery: str | None = None
+    invite_url: str | None = None
+
+
+class InvitationPreviewOut(BaseModel):
+    organization_name: str
+    email: str
+    role: MembershipRole
+    expires_at: datetime
+    user_exists: bool
+
+
+class InvitationAcceptIn(BaseModel):
+    token: str = Field(min_length=20, max_length=300)
+    password: str = Field(min_length=1, max_length=200)
+
+
 class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     platform: str = Field(default="facebook", max_length=40)
@@ -81,6 +163,7 @@ class AccountOut(BaseModel):
     created_at: datetime
     # Les cookies ne sont JAMAIS exposes : uniquement leur presence.
     has_session: bool = False
+    session_expires_at: datetime | None = None
     target_count: int = 0
 
 
@@ -287,6 +370,12 @@ class RunOut(RunSummary):
     content_sha256: str | None
     page_title: str | None
     final_url: str | None
+    drive_status: str = "local"
+    drive_attempts: int = 0
+    drive_last_error: str | None = None
+    drive_uploaded_at: datetime | None = None
+    drive_next_retry_at: datetime | None = None
+    drive_file_link: str | None = None
     # Capture réussie précédente de la même cible (pour la comparaison avant/après).
     previous_run_id: int | None = None
     logs: list[RunLogOut] = []
@@ -311,6 +400,28 @@ class HealthOut(BaseModel):
     scheduler_running: bool
     jobs: int
     targets_enabled: int
+    queue_backend: str = "inline"
+    redis_ok: bool = True
+    worker_alive: bool = True
+    queue_depth: int = 0
+    database_backend: str = "sqlite"
+    storage_backend: str = "local"
+    drive_configured: bool = False
+
+
+class DriveCheckOut(BaseModel):
+    configured: bool
+    writable: bool
+    parent_name: str | None = None
+    shared_drive: bool = False
+    detail: str
+
+
+class DriveRetryOut(BaseModel):
+    run_id: int
+    drive_status: str
+    drive_file_link: str | None = None
+    detail: str
 
 
 class JobOut(BaseModel):

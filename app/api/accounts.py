@@ -6,14 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user
+from app.api.deps import current_organization, current_user, organization_admin
 from app.config import settings
 from app.database import get_session
 from app.models import Account, AccountStatus, Target, User, utcnow
 from app.schemas import AccountCreate, AccountOut, LoginStatusOut, SessionTestOut
-from app.services import audit, crypto, session_check
+from app.services import audit, crypto, quotas, session_check, session_state, tenancy
 from app.services.capture import slugify
 from app.services.login_browser import LoginBusy, login_manager
+from app.services.request_ip import client_ip
 
 router = APIRouter(
     prefix="/api/accounts", tags=["Comptes connectés"], dependencies=[Depends(current_user)]
@@ -37,7 +38,12 @@ def _pose_novnc_cookie(response: Response, token: str) -> None:
     )
 
 
-def _owned(session: Session, account_id: int, user: User) -> Account:
+def _owned(
+    session: Session,
+    account_id: int,
+    user: User,
+    context: tenancy.OrganizationContext,
+) -> Account:
     """Récupère un compte en vérifiant l'appartenance à l'utilisateur.
 
     Une session ne doit jamais être accessible à un autre utilisateur.
@@ -45,8 +51,8 @@ def _owned(session: Session, account_id: int, user: User) -> Account:
     account = session.get(Account, account_id)
     if account is None:
         raise HTTPException(status_code=404, detail="Compte introuvable")
-    if user.id and account.owner_id not in (None, user.id):
-        raise HTTPException(status_code=403, detail="Ce compte appartient à un autre utilisateur.")
+    if account.organization_id != context.organization.id:
+        raise HTTPException(status_code=403, detail="Ce compte appartient à une autre organisation.")
     return account
 
 
@@ -56,15 +62,21 @@ def _to_out(session: Session, account: Account) -> AccountOut:
     )
     out = AccountOut.model_validate(account)
     out.has_session = bool(account.encrypted_state) or crypto.profile_exists(account.profile_slug)
+    _, out.session_expires_at = session_state.session_expiry(account.encrypted_state)
     out.target_count = count or 0
     return out
 
 
 @router.get("", response_model=list[AccountOut], summary="Lister les comptes connectés")
-def list_accounts(user: User = Depends(current_user), session: Session = Depends(get_session)):
-    stmt = select(Account).order_by(Account.id)
-    if user.id:
-        stmt = stmt.where((Account.owner_id == user.id) | (Account.owner_id.is_(None)))
+def list_accounts(
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
+    stmt = (
+        select(Account)
+        .where(Account.organization_id == context.organization.id)
+        .order_by(Account.id)
+    )
     return [_to_out(session, a) for a in session.scalars(stmt).all()]
 
 
@@ -75,14 +87,20 @@ def create_account(
     payload: AccountCreate,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
+    try:
+        quotas.enforce_account_creation(session, context.organization.id)
+    except quotas.QuotaExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     slug = f"acct-{slugify(payload.name, 40)}-{secrets.token_hex(3)}"
     account = Account(
         name=payload.name,
         platform=payload.platform,
         profile_slug=slug,
-        owner_id=user.id or None,
+        owner_id=user.id,
+        organization_id=context.organization.id,
         status=AccountStatus.never,
     )
     session.add(account)
@@ -90,7 +108,7 @@ def create_account(
     session.refresh(account)
     audit.record(
         session, "account.create", user=user, detail=f"compte #{account.id} {account.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return _to_out(session, account)
 
@@ -103,9 +121,10 @@ async def delete_account(
     account_id: int,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
-    account = _owned(session, account_id, user)
+    account = _owned(session, account_id, user, context)
     # Ferme un login éventuellement en cours, puis efface le coffre chiffré.
     await login_manager.cancel(account_id)
     crypto.delete_vault(account.profile_slug)
@@ -114,7 +133,7 @@ async def delete_account(
         t.account_id = None
     audit.record(
         session, "account.delete", user=user, detail=f"compte #{account_id} {account.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     session.delete(account)
     session.commit()
@@ -130,9 +149,10 @@ async def login_start(
     request: Request,
     response: Response,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
-    account = _owned(session, account_id, user)
+    account = _owned(session, account_id, user, context)
     try:
         token = await login_manager.start(account_id, account.profile_slug, account.platform, user.id)
     except LoginBusy as exc:
@@ -146,7 +166,7 @@ async def login_start(
 
     audit.record(
         session, "account.login_start", user=user, detail=f"compte #{account_id}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return LoginStatusOut(
         active=True,
@@ -161,7 +181,13 @@ async def login_start(
     "/{account_id}/login/status", response_model=LoginStatusOut,
     summary="État de la connexion manuelle en cours",
 )
-async def login_status(account_id: int, user: User = Depends(current_user)):
+async def login_status(
+    account_id: int,
+    user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
+    session: Session = Depends(get_session),
+):
+    _owned(session, account_id, user, context)
     probe = await login_manager.probe(account_id)
     return LoginStatusOut(
         active=probe.get("active", False),
@@ -181,9 +207,10 @@ async def login_finish(
     request: Request,
     response: Response,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
-    account = _owned(session, account_id, user)
+    account = _owned(session, account_id, user, context)
     try:
         result = await login_manager.finish(account_id)
     except RuntimeError as exc:
@@ -207,7 +234,7 @@ async def login_finish(
     audit.record(
         session, "account.login_finish", user=user,
         detail=f"compte #{account_id} connecté={result['logged_in']}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return SessionTestOut(
         account_id=account_id, status=account.status,
@@ -224,13 +251,15 @@ async def login_cancel(
     request: Request,
     response: Response,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
+    _owned(session, account_id, user, context)
     await login_manager.cancel(account_id)
     response.delete_cookie(NOVNC_COOKIE, path="/")
     audit.record(
         session, "account.login_cancel", user=user, detail=f"compte #{account_id}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
 
 
@@ -255,19 +284,32 @@ def novnc_authorize(request: Request, user: User = Depends(current_user)):
 )
 async def test_session(
     account_id: int,
+    request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
-    account = _owned(session, account_id, user)
+    account = _owned(session, account_id, user, context)
     if login_manager.active_account_id == account_id:
         raise HTTPException(
             status_code=409, detail="Une connexion manuelle est en cours pour ce compte."
         )
     result = await session_check.check_account(account.profile_slug, account.platform)
     account.status = result["status"]
+    if result.get("encrypted_state"):
+        account.encrypted_state = result["encrypted_state"]
     account.last_verified_at = utcnow()
-    account.last_error = result["detail"] if result["status"] == AccountStatus.error else None
+    account.last_error = (
+        None if result["status"] == AccountStatus.connected else result["detail"]
+    )
     session.commit()
+    audit.record(
+        session,
+        "account.session_test",
+        user=user,
+        detail=f"compte #{account_id} statut={account.status.value}",
+        ip=client_ip(request),
+    )
     return SessionTestOut(
         account_id=account_id,
         status=account.status,

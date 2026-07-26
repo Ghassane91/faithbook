@@ -28,7 +28,7 @@ def record(
             action=action,
             detail=detail,
             ip=ip,
-            user_id=user.id if user and user.id else None,
+            user_id=user.id if user is not None and user.id is not None else None,
             user_email=user.email if user else None,
         )
     )

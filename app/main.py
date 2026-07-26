@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import accounts
 from app.api import auth as auth_api
-from app.api import runs, system, targets
+from app.api import organizations, runs, system, targets
 from app.config import settings
 from app.database import init_db, session_scope
 from app.scheduler import mark_interrupted_runs, shutdown_scheduler, start_scheduler
@@ -19,6 +19,9 @@ from app.services.auth import (
     purge_expired_reset_tokens,
     purge_expired_sessions,
 )
+from app.services.crypto import ensure_encryption_ready
+from app.services.legacy_migration import migrate_sqlite_if_needed
+from app.services.tenancy import ensure_legacy_organizations
 
 
 def setup_logging() -> None:
@@ -42,9 +45,12 @@ def setup_logging() -> None:
 async def lifespan(_app: FastAPI):
     setup_logging()
     Path(settings.screenshot_dir).mkdir(parents=True, exist_ok=True)
+    ensure_encryption_ready()
     init_db()
+    migrate_sqlite_if_needed()
     with session_scope() as db:
         ensure_first_user(db)
+        ensure_legacy_organizations(db)
         purged = purge_expired_sessions(db)
         if purged:
             logging.getLogger(__name__).info("%s session(s) expiree(s) purgee(s)", purged)
@@ -69,14 +75,16 @@ journalisee, deduplicable et reessayee automatiquement en cas d'echec.
 **Authentification** : si `API_KEY` est definie, envoyer l'en-tete `X-API-Key`.
 """
 
+_docs_enabled = settings.environment != "production"
+
 app = FastAPI(
     title="Capture Scheduler API",
     description=DESCRIPTION,
     version=system.VERSION,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 app.add_middleware(
@@ -90,10 +98,15 @@ app.add_middleware(
 app.include_router(auth_api.router)
 app.include_router(system.router)
 app.include_router(accounts.router)
+app.include_router(organizations.router)
 app.include_router(targets.router)
 app.include_router(runs.router)
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return {"service": "Capture Scheduler API", "docs": "/docs", "health": "/api/health"}
+    return {
+        "service": "Capture Scheduler API",
+        "docs": "/docs" if _docs_enabled else None,
+        "health": "/api/health",
+    }

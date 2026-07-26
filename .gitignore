@@ -6,6 +6,8 @@ __pycache__/
 *.pyc
 .venv/
 captures/
+backups/
+*.fbk
 frontend/node_modules/
 frontend/dist/
 
@@ -20,3 +22,11 @@ Thumbs.db
 # Outils Windows : config machine + journaux locaux (exe couverts par *.exe).
 capture-bureau/*.config.txt
 capture-bureau/*.log
+
+# Raccourcis Windows et archives de sauvegarde locales (pas du code source).
+*.lnk
+FaithBook-source*.zip
+# Export packagé (copie complète + exécutables), régénérable, pas du code source.
+deliverable/
+# Cache de build TypeScript.
+frontend/tsconfig.tsbuildinfo

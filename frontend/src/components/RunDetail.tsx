@@ -6,13 +6,30 @@ import { Comparaison } from './Comparaison'
 
 interface Props {
   runId: number
+  canAdmin: boolean
   onClose: () => void
 }
 
-export function RunDetail({ runId, onClose }: Props) {
+export function RunDetail({ runId, canAdmin, onClose }: Props) {
   const enCours = (r: Run | null) => r?.status === 'pending' || r?.status === 'running'
-  const { data: run, erreur } = useData<Run>(() => api.run(runId), [runId], 3000)
+  const { data: run, erreur, recharger } = useData<Run>(() => api.run(runId), [runId], 3000)
   const [compare, setCompare] = useState(false)
+  const [driveBusy, setDriveBusy] = useState(false)
+  const [driveMessage, setDriveMessage] = useState<string | null>(null)
+
+  async function retryDrive() {
+    setDriveBusy(true)
+    setDriveMessage(null)
+    try {
+      const result = await api.retryDrive(runId)
+      setDriveMessage(result.detail)
+      recharger()
+    } catch (err) {
+      setDriveMessage(err instanceof Error ? err.message : 'Envoi Drive impossible')
+    } finally {
+      setDriveBusy(false)
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -124,6 +141,61 @@ export function RunDetail({ runId, onClose }: Props) {
                 )}
               </dl>
             </div>
+
+            {run.drive_status !== 'local' && (
+              <div className="section">
+                <h3>Google Drive</h3>
+                <dl className="kv">
+                  <dt>état</dt>
+                  <dd>
+                    <span className={`tag ${run.drive_status === 'uploaded' ? 'success' : run.drive_status === 'failed' ? 'failed' : 'running'}`}>
+                      {run.drive_status === 'uploaded'
+                        ? 'envoyée'
+                        : run.drive_status === 'failed'
+                          ? 'à reprendre'
+                          : 'en attente'}
+                    </span>
+                  </dd>
+                  <dt>tentatives</dt>
+                  <dd className="mono">{run.drive_attempts}</dd>
+                  {run.drive_uploaded_at && (
+                    <>
+                      <dt>envoyée le</dt>
+                      <dd className="mono">{dateHeure(run.drive_uploaded_at)}</dd>
+                    </>
+                  )}
+                  {run.drive_next_retry_at && run.drive_status !== 'uploaded' && (
+                    <>
+                      <dt>prochain essai</dt>
+                      <dd className="mono">{dateHeure(run.drive_next_retry_at)}</dd>
+                    </>
+                  )}
+                </dl>
+                {run.drive_last_error && (
+                  <div className="notice error" style={{ marginTop: 10 }}>
+                    {run.drive_last_error}
+                  </div>
+                )}
+                {driveMessage && <div className="notice info">{driveMessage}</div>}
+                <div className="btn-row" style={{ marginTop: 10 }}>
+                  {run.drive_file_link && (
+                    <a
+                      className="btn sm"
+                      href={run.drive_file_link}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Ouvrir dans Drive
+                    </a>
+                  )}
+                  {canAdmin && run.drive_status !== 'uploaded' && (
+                    <button className="btn ghost sm" onClick={retryDrive} disabled={driveBusy}>
+                      {driveBusy ? <span className="spinner" /> : 'Relancer l’envoi'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {run.screenshot_bytes != null && (
               <div className="section">

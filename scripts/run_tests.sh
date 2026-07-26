@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Lance la suite de tests contre le conteneur en cours d'execution.
-#   bash scripts/run_tests.sh [port]
+#   bash scripts/run_tests.sh [port-interface]
 # Les tests de tests/suspendu/ (Google Drive) ne sont pas joues : voir leur README.
 set -u
 export MSYS_NO_PATHCONV=1
 
-PORT="${1:-8020}"
-FRONT_PORT="${2:-3000}"
+FRONT_PORT="${1:-3000}"
 CONTAINER="faithbook-backend"
 FAILED=0
 
@@ -17,12 +16,12 @@ fi
 
 # Le smoke test a besoin de s'authentifier. On lui passe API_KEY si elle est
 # definie, sinon SMOKE_PASSWORD (mot de passe du compte admin).
-echo "=== 1/2 API de bout en bout (port ${PORT}) ==="
+echo "=== 1/2 API de bout en bout via nginx (port ${FRONT_PORT}) ==="
 if [ -z "${API_KEY:-}" ] && [ -z "${SMOKE_PASSWORD:-}" ]; then
     echo "  IGNORE : definir API_KEY ou SMOKE_PASSWORD pour lancer ce test."
     echo "           ex. SMOKE_PASSWORD='...' bash scripts/run_tests.sh"
 else
-    python scripts/smoke_test.py "http://localhost:${PORT}" || FAILED=1
+    python scripts/smoke_test.py "http://localhost:${FRONT_PORT}" || FAILED=1
 fi
 
 echo

@@ -1,4 +1,5 @@
 from functools import lru_cache
+import ipaddress
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +15,15 @@ class Settings(BaseSettings):
     # Cle machine-a-machine pour les scripts. N'a rien a voir avec les comptes
     # utilisateurs : elle ne donne acces qu'a l'API, jamais a l'interface.
     api_key: str = ""
+    # La cle API agit au nom de ce compte reel. Cela conserve l'acces
+    # machine-a-machine aux comptes connectes/noVNC sans utilisateur artificiel
+    # id=0 ni contournement des controles de propriete.
+    api_key_user_email: str = ""
     cors_origins: str = "*"
+    environment: Literal["development", "test", "production"] = "development"
+    # Seuls ces relais peuvent fournir X-Forwarded-For. Le reseau 172.16/12
+    # couvre le bridge Docker habituel ; le backend n'est pas publie sur l'hote.
+    trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128,172.16.0.0/12"
 
     # Authentification
     admin_email: str = "admin@local"
@@ -26,6 +35,8 @@ class Settings(BaseSettings):
     # Reinitialisation de mot de passe par mail
     # Duree de validite du lien de reinitialisation.
     reset_token_minutes: int = 60
+    # Durée de validité d'une invitation à rejoindre une organisation.
+    invitation_days: int = 7
     # URL publique de l'interface, base du lien envoye par mail. En local :
     # http://localhost:3000 ; sur VPS : le domaine HTTPS du frontend.
     public_url: str = "http://localhost:3000"
@@ -61,6 +72,9 @@ class Settings(BaseSettings):
     # Autorise les cibles vers des adresses privees/internes. Danger : a laisser
     # a false sauf reseau de confiance.
     allow_private_targets: bool = False
+    # Proxy sortant qui applique une seconde barriere reseau (ACL Squid) apres
+    # les validations applicatives. Configure automatiquement par Compose.
+    browser_proxy_url: str = ""
 
     # Planification
     timezone: str = "UTC"
@@ -71,10 +85,25 @@ class Settings(BaseSettings):
     screenshot_dir: str = "/data/screenshots"
     database_url: str = "sqlite:////data/app.db"
 
-    # Google Drive : EN SUSPEND (voir README §2). Non expose par l'API.
+    # File d'exécution : inline pour les tests/développement sans Redis,
+    # redis pour séparer l'API du worker de captures.
+    queue_backend: Literal["inline", "redis"] = "inline"
+    redis_url: str = "redis://redis:6379/0"
+    queue_name: str = "faithbook:capture-runs"
+    worker_lock_ttl_seconds: int = 21600
+    auto_migrate_sqlite: bool = True
+    legacy_sqlite_path: str = "/data/app.db"
+
+    # Google Drive : compte de service + dossier parent partagé.
     google_service_account_file: str = "/secrets/service-account.json"
     google_drive_parent_folder_id: str = ""
     google_drive_shared_drive_id: str = ""
+    # Nombre de nouvelles tentatives internes du client Google sur les erreurs
+    # transitoires (429/5xx) pendant un envoi reprenable.
+    google_drive_api_retries: int = 3
+    # Les captures locales dont l'envoi a échoué sont reprises automatiquement.
+    google_drive_retry_minutes: int = 5
+    google_drive_retry_batch_size: int = 20
     # Format du nom des dossiers dates, en local comme sur Drive.
     folder_date_format: str = "%Y-%m-%d"
 
@@ -92,6 +121,8 @@ class Settings(BaseSettings):
     daily_report_time: str = "08:00"
     # Verification quotidienne des sessions des comptes connectes (HH:MM, vide = desactive).
     session_check_time: str = "07:30"
+    # Alerte quand le cookie de session à échéance connue expire dans N jours.
+    session_expiry_warning_days: int = 7
 
     # Capture
     default_viewport_width: int = 1440
@@ -99,11 +130,24 @@ class Settings(BaseSettings):
     default_timeout_ms: int = 45000
     default_wait_after_load_ms: int = 2000
     default_user_agent: str = ""
+    # Une capture pleine page descend progressivement pour déclencher le
+    # lazy-loading (publications, images, listes infinies) avant le PNG final.
+    auto_scroll_full_page: bool = True
+    auto_scroll_delay_ms: int = 900
+    auto_scroll_max_steps: int = 50
+    auto_scroll_stable_rounds: int = 4
 
     # Fiabilite
     max_attempts: int = 3
     retry_backoff_seconds: int = 15
     dedupe_mode: Literal["per_day", "content_hash", "both", "off"] = "per_day"
+    # Valeurs attribuées à toute nouvelle organisation. 0 = illimité.
+    default_quota_accounts: int = 10
+    default_quota_targets: int = 100
+    default_quota_daily_captures: int = 500
+    default_quota_storage_bytes: int = 10_737_418_240
+    # Conservé comme défaut des nouvelles organisations et compatibilité
+    # d'environnement. La purge utilise ensuite la valeur propre à chaque org.
     run_retention_days: int = 90
 
     # Logs
@@ -117,6 +161,15 @@ class Settings(BaseSettings):
     @property
     def allowed_domain_list(self) -> list[str]:
         return [d.strip().lower() for d in self.allowed_domains.split(",") if d.strip()]
+
+    @property
+    def trusted_proxy_networks(self) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+        networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        for value in self.trusted_proxy_cidrs.split(","):
+            value = value.strip()
+            if value:
+                networks.append(ipaddress.ip_network(value, strict=False))
+        return networks
 
 
 @lru_cache

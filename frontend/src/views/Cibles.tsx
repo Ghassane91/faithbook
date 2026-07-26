@@ -7,9 +7,11 @@ import type { Target } from '../types'
 
 interface Props {
   onOuvrirRun: (id: number) => void
+  canEdit: boolean
+  canDelete: boolean
 }
 
-export function Cibles({ onOuvrirRun }: Props) {
+export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
   const { data: cibles, erreur, chargement, recharger } = useData(() => api.targets(), [], 20000)
   const [edition, setEdition] = useState<Target | null | undefined>(undefined)
   const [stats, setStats] = useState<Target | null>(null)
@@ -54,9 +56,11 @@ export function Cibles({ onOuvrirRun }: Props) {
           <h1>Cibles</h1>
           <p>Une cible, c’est une adresse et une heure. Le reste n’est là que pour les cas tordus.</p>
         </div>
-        <button className="btn" onClick={() => setEdition(null)}>
-          Ajouter une cible
-        </button>
+        {canEdit && (
+          <button className="btn" onClick={() => setEdition(null)}>
+            Ajouter une cible
+          </button>
+        )}
       </div>
 
       {message && <div className={`notice ${message.type}`}>{message.texte}</div>}
@@ -70,9 +74,11 @@ export function Cibles({ onOuvrirRun }: Props) {
             Ajoutez la première page à surveiller. Vous pourrez lancer une capture d’essai
             immédiatement, sans attendre l’heure prévue.
           </p>
-          <button className="btn" onClick={() => setEdition(null)}>
-            Ajouter une cible
-          </button>
+          {canEdit && (
+            <button className="btn" onClick={() => setEdition(null)}>
+              Ajouter une cible
+            </button>
+          )}
         </div>
       )}
 
@@ -127,25 +133,33 @@ export function Cibles({ onOuvrirRun }: Props) {
                   </td>
                   <td>
                     <div className="btn-row">
-                      <button
-                        className="btn sm"
-                        disabled={occupe === c.id}
-                        onClick={() => lancer(c, false)}
-                      >
-                        {occupe === c.id ? <span className="spinner" /> : 'Capturer'}
-                      </button>
-                      <button className="btn ghost sm" onClick={() => lancer(c, true)} title="Ignorer la déduplication">
-                        Forcer
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button
+                            className="btn sm"
+                            disabled={occupe === c.id}
+                            onClick={() => lancer(c, false)}
+                          >
+                            {occupe === c.id ? <span className="spinner" /> : 'Capturer'}
+                          </button>
+                          <button className="btn ghost sm" onClick={() => lancer(c, true)} title="Ignorer la déduplication">
+                            Forcer
+                          </button>
+                        </>
+                      )}
                       <button className="btn ghost sm" onClick={() => setStats(c)} title="Évolution des abonnés / mentions J’aime">
                         Stats
                       </button>
-                      <button className="btn ghost sm" onClick={() => setEdition(c)}>
-                        Modifier
-                      </button>
-                      <button className="btn ghost sm" onClick={() => basculer(c)}>
-                        {c.enabled ? 'Pause' : 'Reprendre'}
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button className="btn ghost sm" onClick={() => setEdition(c)}>
+                            Modifier
+                          </button>
+                          <button className="btn ghost sm" onClick={() => basculer(c)}>
+                            {c.enabled ? 'Pause' : 'Reprendre'}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -156,7 +170,12 @@ export function Cibles({ onOuvrirRun }: Props) {
       )}
 
       {edition !== undefined && (
-        <TargetForm cible={edition} onClose={() => setEdition(undefined)} onSaved={recharger} />
+        <TargetForm
+          cible={edition}
+          canDelete={canDelete}
+          onClose={() => setEdition(undefined)}
+          onSaved={recharger}
+        />
       )}
       {stats && (
         <StatsCible targetId={stats.id} nom={stats.name} onClose={() => setStats(null)} />

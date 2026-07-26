@@ -7,8 +7,9 @@ site + date + heure).
 - **API** : FastAPI (documentation OpenAPI sur `/docs`)
 - **Navigateur** : Playwright / Chromium
 - **Planification** : APScheduler (cron, avec fuseau horaire)
-- **Base** : SQLite (fichier dans le volume `data/`)
-- **Stockage** : un dossier de votre machine (§1). Google Drive : en suspens (§2).
+- **Base** : PostgreSQL 17, avec migration automatique de l'ancienne SQLite
+- **File d'exécution** : Redis + worker de captures séparé
+- **Stockage** : copie locale durable + envoi facultatif vers Google Drive (§2).
 - **Interface** : React + Vite, servie par nginx qui relaie l'API (§7)
 
 Tout est piloté par variables d'environnement : **le passage du poste local au
@@ -25,11 +26,18 @@ phase livre un commit propre, ses tests, et cette section a jour.
 |---|---|---|
 | 0 | Audit (architecture, risques, dépendances Windows, plan) | ✅ Fait |
 | 1a | **Sécurité immédiate** : SSRF branché, jeton noVNC + isolation entre utilisateurs, `/docs` protégé, chiffrement du `storage_state_json` legacy, audit élargi | ✅ Fait — voir §8, §10, §11 |
-| 1b | Sessions robustes : rescellement des cookies après capture, statuts `suspended`/`disconnected`, alerte pré-expiration | ⏳ À faire |
-| 1c | Ops : `depends_on` healthy, sauvegarde/restauration, CI locale | ⏳ À faire |
-| 2 | Multi-tenant (organisations, rôles, invitations), file d'exécution (Redis + workers), PostgreSQL par défaut en SaaS | ⏳ À faire |
-| 3 | Abstraction de stockage (local / S3 / Drive API), quotas, URLs signées | ⏳ À faire |
-| 4–8 | Comparaison avancée, analyse de contenu (IA optionnelle), alertes multi-canaux, gestion de cibles avancée, quotas/plans | ⏳ À faire |
+| 1a.1 | **Durcissement adversarial** : redirections et sous-requêtes revalidées, proxy anti-DNS-rebinding, clé API rattachée à un utilisateur réel, backend non publié, IP réelle fiable, génération atomique de clé, audit du test de session | ✅ Fait |
+| 1b | **Sessions robustes** : rescellement des cookies après capture, verrou par profil, statuts `suspended`/`disconnected`, alerte pré-expiration | ✅ Fait — v1.1.0 |
+| 1c | **Exploitation fiable** : démarrage conditionné par les healthchecks, sauvegarde/restauration chiffrée, validation locale et CI | ✅ Fait — v1.2.1 |
+| 2a | **Socle multi-organisation** : espaces isolés, rôles propriétaire/admin/membre/lecture seule, sélecteur d'espace, gestion des membres, captures et profils séparés sur disque | ✅ Fait — v1.3.0 |
+| 2b | **Invitations d'équipe** : e-mail à usage unique, création guidée du compte, rattachement à l'organisation, révocation et récupération d'accès | ✅ Fait — v1.4.0 |
+| 2c | **Exécution distribuée** : PostgreSQL, migration automatique de SQLite, file Redis fiable, worker séparé, healthchecks et sauvegarde PostgreSQL | ✅ Fait — v1.5.2 |
+| 3a | **Google Drive fiable** : dossiers datés, envoi reprenable, reprise sans nouvelle capture, statut et lien dans l'interface | ✅ Fait — v1.6.0 |
+| 3b | **Quotas et rétention par organisation** : limites comptes/cibles/captures/stockage, blocage avant Chromium, consommation API et purge isolée | ✅ Fait — v1.7.0 |
+| 3c | **Interface premium et captures longues** : identité noir/ivoire, responsive, boutons ergonomiques, aperçus pleine hauteur et assemblage des fils Facebook virtualisés | ✅ Fait — v1.8.3 |
+| 3c.1 | **Robustesse du proxy sortant** : Squid supprime le PID périmé (`/run/squid.pid`) avant chaque démarrage et devient PID 1 via `exec`, ce qui évite la boucle de crash-restart après un redémarrage brutal de Docker Desktop | ✅ Fait — v1.8.4 |
+| 3d | Stockage S3 et URLs signées | ⏳ À faire |
+| 4–8 | Comparaison avancée, analyse de contenu (IA optionnelle), alertes multi-canaux, gestion de cibles avancée et plans commerciaux | ⏳ À faire |
 
 Le développement continue **en local** ; le passage sur VPS (§13) n'aura lieu
 qu'une fois la plateforme validée. Aucune facturation réelle n'est développée
@@ -46,12 +54,21 @@ docker compose up -d --build
 ```
 
 - **Interface web : http://localhost:3000** ← le point d'entrée
-- API : http://localhost:8020
-- Documentation interactive : http://localhost:8020/docs
+- API via nginx : http://localhost:3000/api
+- Documentation interactive : http://localhost:3000/docs
 
-> **Port 8020 et non 8000** : le port 8000 était déjà occupé sur ce poste par le
-> conteneur `fencive-ui`. Réglé par `API_PORT=8020` dans le `.env`, sans aucune
-> modification de code.
+Le port du backend n'est plus publié sur la machine : passer directement par
+`8000`/`8020` contournerait les protections nginx. Pour un diagnostic local
+exceptionnel, utiliser le fichier dédié, lié uniquement à `127.0.0.1` :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+Compose attend PostgreSQL, Redis et le proxy sortant, puis démarre le backend,
+le worker de captures et enfin le frontend.
+Avec `docker compose up -d --wait`, la commande ne rend la main que lorsque
+les six services sont réellement prêts.
 
 ### Lanceur Windows (double-clic)
 
@@ -142,16 +159,44 @@ d'après le **site, la date et l'heure** — reconnaissable au premier coup d'œ
 
 ```
 captures/
-  facebook.com-spypoint.ca/
-    facebook.com-spypoint.ca_2026-07-22_090012.png
-  integr-it.com/
-    integr-it.com_2026-07-22_090300.png
+  organization-1/
+    facebook.com-spypoint.ca/
+      facebook.com-spypoint.ca_2026-07-22_090012.png
+    integr-it.com/
+      integr-it.com_2026-07-22_090300.png
 ```
 
 Le nom du site vient du domaine (sans `www`) plus le chemin de page éventuel,
 pour distinguer deux pages d'un même domaine
 (`facebook.com/SPYPOINT.CA` → `facebook.com-spypoint.ca`). Un `subfolder` de
 cible, si renseigné, s'insère sous le dossier du site.
+
+### Chargement des publications avant la capture
+
+Pour toute cible avec **Page entière** activé, FaithBook descend
+progressivement, attend le chargement des publications et images différées,
+continue tant que la page s'allonge, puis remonte en haut et crée le PNG
+complet. Cette règle est générale, notamment pour les groupes Facebook et les
+fils à défilement infini.
+
+Facebook virtualise certains fils : les publications déjà parcourues sont
+retirées du DOM alors que la hauteur vide reste déclarée. Pour ces URL,
+FaithBook v1.8.3 enregistre chaque fenêtre pendant le défilement puis assemble
+les segments réellement visibles. Cela évite les PNG très longs composés
+presque uniquement d'une zone grise vide.
+
+Les limites évitent qu'un fil réellement infini bloque le worker :
+
+```env
+AUTO_SCROLL_FULL_PAGE=true
+AUTO_SCROLL_DELAY_MS=900
+AUTO_SCROLL_MAX_STEPS=50
+AUTO_SCROLL_STABLE_ROUNDS=4
+```
+
+Pour charger davantage de publications, augmenter `AUTO_SCROLL_MAX_STEPS`.
+Pour un site lent, augmenter `AUTO_SCROLL_DELAY_MS`. Les valeurs utilisées
+sont consignées dans le journal de l'exécution.
 
 Règles pour `OUTPUT_DIR` :
 
@@ -165,40 +210,79 @@ Règles pour `OUTPUT_DIR` :
 Créer une cible et lancer une capture immédiatement :
 
 ```bash
-curl -X POST http://localhost:8020/api/targets \
+curl -X POST http://localhost:3000/api/targets \
   -H "Content-Type: application/json" \
   -d '{"name":"Exemple","url":"https://example.com","run_time":"09:00"}'
 
-curl -X POST http://localhost:8020/api/targets/1/run
-curl http://localhost:8020/api/runs/1            # statut + logs détaillés
-curl -o capture.png http://localhost:8020/api/runs/1/screenshot
+curl -X POST http://localhost:3000/api/targets/1/run
+curl http://localhost:3000/api/runs/1            # statut + logs détaillés
+curl -o capture.png http://localhost:3000/api/runs/1/screenshot
 ```
 
 Ou, tout en un, avec le script de vérification :
 
 ```bash
-bash scripts/run_tests.sh 8020 3000
+bash scripts/run_tests.sh 3000
 ```
 
 ---
 
-## 2. Google Drive — EN SUSPEND
+## 2. Google Drive API
 
-**Cette option n'est pas active.** Les captures sont enregistrées uniquement
-dans `OUTPUT_DIR` (§1). L'API n'expose plus rien lié à Drive.
+Le mode `google_drive` garde toujours la capture locale dans `OUTPUT_DIR`, puis
+l'envoie vers Drive. Si Drive est indisponible, la capture reste réussie :
+l'envoi seul est repris automatiquement, sans rouvrir Facebook et sans refaire
+le PNG.
 
-Rien n'a été supprimé pour autant :
+Structure créée dans le dossier parent :
 
-| Élément | Emplacement | État |
-|---|---|---|
-| Client Drive | [drive.py](app/services/drive.py) | conservé, non appelé |
-| Tests (39 vérifications) | [tests/suspendu/](tests/suspendu/) | conservés, hors suite par défaut |
-| Colonnes `drive_*` de `runs` | [models.py](app/models.py) | conservées, non exposées |
-| Variables `GOOGLE_*` | `.env.example` | commentées |
+```text
+2026-07-25/
+  organization-1/
+    facebook.com-groups-exemple/
+      facebook.com-groups-exemple_2026-07-25_090012.png
+```
 
-Pour réactiver plus tard : décommenter le bloc `GOOGLE_*` du `.env`, passer
-`STORAGE_BACKEND=google_drive`, remettre la route `/api/drive/check` dans
-[system.py](app/api/system.py) et rejouer les tests de `tests/suspendu/`.
+### Configuration recommandée
+
+1. Dans Google Cloud, créer un projet, activer **Google Drive API**, créer un
+   compte de service et télécharger sa clé JSON.
+2. Créer un **Drive partagé** Google Workspace et un dossier parent destiné à
+   FaithBook. Ajouter l'adresse du compte de service avec un rôle qui autorise
+   la création de fichiers.
+3. Placer la clé ici, sans jamais la publier ni l'envoyer dans une conversation :
+
+   ```text
+   Face Book/secrets/service-account.json
+   ```
+
+4. Copier les identifiants depuis les URL Google Drive et compléter `.env` :
+
+   ```env
+   STORAGE_BACKEND=google_drive
+   GOOGLE_SERVICE_ACCOUNT_FILE=/secrets/service-account.json
+   GOOGLE_DRIVE_PARENT_FOLDER_ID=identifiant_du_dossier_parent
+   GOOGLE_DRIVE_SHARED_DRIVE_ID=identifiant_du_drive_partage
+   ```
+
+5. Recréer les services pour relire le `.env`, puis vérifier l'accès :
+
+   ```powershell
+   docker compose up -d --build --force-recreate
+   docker compose exec backend python -c "from app.services.drive import drive_client; print(drive_client.check_access())"
+   ```
+
+Un administrateur peut aussi ouvrir **Équipe → Stockage Google Drive → Tester
+Google Drive**. Le détail d'une exécution affiche l'état, le prochain essai, le
+lien Drive et un bouton de reprise manuelle.
+
+Les envois utilisent des sessions reprenables. Les erreurs transitoires Google
+sont retentées par le client ; les autres échecs sont repris par FaithBook avec
+un délai croissant, toutes les `GOOGLE_DRIVE_RETRY_MINUTES`.
+
+Un compte de service ne dispose pas de quota de stockage propre. Un Drive
+partagé est donc la configuration recommandée. Dans un domaine Workspace,
+l'autre solution est une délégation d'autorité configurée par l'administrateur.
 
 ---
 
@@ -208,14 +292,15 @@ Pour réactiver plus tard : décommenter le bloc `GOOGLE_*` du `.env`, passer
 |---|---|---|
 | 1 | URL + heure configurables | Table `targets`, `run_time` (HH:MM) ou `cron_expression` — [models.py](app/models.py) |
 | 2 | Ouverture automatique | APScheduler → [scheduler.py](app/scheduler.py) |
-| 3 | Capture complète | `full_page=True` + pré-scroll lazy-load — [capture.py](app/services/capture.py) |
+| 3 | Capture complète | `full_page=True` + défilement progressif jusqu'à stabilisation avant le PNG — [capture.py](app/services/capture.py) |
 | 4 | Rangement par site | Un dossier par site dans `OUTPUT_DIR` — [runner.py](app/services/runner.py) |
-| 5 | Dépôt de la capture | Écriture dans le dossier du site, nom = site + date + heure |
+| 5 | Dépôt de la capture | Copie locale puis Drive facultatif, dossier daté, nom = site + date + heure |
 | 6 | Éviter les doublons | 3 niveaux, voir §4 — [runner.py](app/services/runner.py) |
 | 7 | Réessai automatique | Backoff exponentiel, `MAX_ATTEMPTS` — [runner.py](app/services/runner.py) |
 | 8 | Logs + statut par exécution | Tables `runs` / `run_logs` + fichier `data/app.log` |
 | 9 | Lancement manuel | `POST /api/targets/{id}/run` |
 | 10 | API REST documentée | OpenAPI sur `/docs` et `/redoc` |
+| 11 | Quotas par espace | Comptes, cibles, captures/jour, stockage et rétention propres à chaque organisation |
 
 ---
 
@@ -244,6 +329,11 @@ passe en `failed` avec le message d'erreur conservé.
 Les exécutions restées `running` après un arrêt brutal du conteneur sont
 marquées en échec au redémarrage (pas d'exécution « fantôme »).
 
+Une redirection Facebook vers `login`, `checkpoint`, `captcha` ou `two_factor`
+n'est pas un incident réseau : aucun réessai inutile n'est lancé. La capture
+passe immédiatement en `suspended`, le compte en `disconnected` ou
+`verification_required`, et une alerte invite à reconnecter le compte.
+
 ### La plateforme vous prévient — plus de surveillance manuelle
 
 Trois automatismes (mails envoyés via le bloc `SMTP_*` du §8 ; sans SMTP, le
@@ -252,7 +342,7 @@ contenu est journalisé) :
 | Automatisme | Quand | Variable |
 |---|---|---|
 | **Alerte d'échec** | Immédiatement quand une capture échoue après tous les réessais — cible, erreur en clair, lien vers l'historique | `NOTIFY_ON_FAILURE=true` |
-| **Contrôle des sessions** | Chaque jour : chaque compte connecté est testé en arrière-plan ; mail **uniquement si** une session est expirée / demande une vérification | `SESSION_CHECK_TIME=07:30` |
+| **Contrôle des sessions** | Chaque jour : chaque compte connecté est testé ; alerte en cas de déconnexion/2FA ou avant l'expiration connue des cookies | `SESSION_CHECK_TIME=07:30`, `SESSION_EXPIRY_WARNING_DAYS=7` |
 | **Rapport quotidien** | Un seul mail le matin : captures d'hier (réussites, échecs et leurs raisons), état des comptes, cibles actives | `DAILY_REPORT_TIME=08:00` |
 
 Destinataire : `NOTIFY_EMAIL`, à défaut l'adresse du premier utilisateur.
@@ -261,9 +351,30 @@ Un horaire vide désactive la tâche.
 ### Nettoyage automatique
 
 Chaque nuit (3 h 30), les exécutions **et les fichiers locaux** plus vieux que
-`RUN_RETENTION_DAYS` (90 j par défaut) sont supprimés, dossiers vides compris.
-La copie déjà synchronisée sur Google Drive n'est pas touchée : elle sert
-d'archive longue durée.
+la durée de rétention de leur organisation sont supprimés, dossiers vides
+compris. `RUN_RETENTION_DAYS` initialise les nouvelles organisations à 90 jours
+par défaut ; `0` désactive la purge. La copie déjà synchronisée sur Google Drive
+n'est pas touchée : elle sert d'archive longue durée.
+
+### Quotas par organisation (v1.7.0)
+
+Chaque espace possède ses propres limites. Un dépassement renvoie `409` et,
+pour une capture, le refus intervient **avant** la mise en file et le lancement
+de Chromium. La taille finale du PNG est recontrôlée avant son enregistrement
+afin que deux workers ne puissent pas dépasser silencieusement le stockage.
+
+| Limite initiale | Variable | Défaut |
+|---|---|---:|
+| Comptes connectés | `DEFAULT_QUOTA_ACCOUNTS` | 10 |
+| Cibles | `DEFAULT_QUOTA_TARGETS` | 100 |
+| Captures commencées par jour | `DEFAULT_QUOTA_DAILY_CAPTURES` | 500 |
+| PNG locaux enregistrés | `DEFAULT_QUOTA_STORAGE_BYTES` | 10 Gio |
+| Rétention locale | `RUN_RETENTION_DAYS` | 90 jours |
+
+`0` signifie illimité pour chaque quota et « ne jamais purger » pour la
+rétention. Ces variables ne définissent que les valeurs initiales : les limites
+sont ensuite stockées sur chaque organisation, prêtes à être reliées à des
+plans commerciaux sans intégrer de paiement dans cette phase.
 
 ### Détection de changement — de l'archivage à la veille
 
@@ -299,13 +410,25 @@ regarde que ce qui a bougé.
 | GET | `/api/runs/{id}` | Détail + logs |
 | GET | `/api/runs/{id}/logs` | Logs seuls |
 | GET | `/api/runs/{id}/screenshot` | Télécharger le PNG |
+| POST | `/api/runs/{id}/drive/retry` | Reprendre l'envoi Drive sans refaire la capture (admin) |
+| POST | `/api/drive/check` | Tester l'accès en écriture au dossier Drive (admin) |
 | GET/POST | `/api/accounts` | Lister / créer un compte connecté |
 | DELETE | `/api/accounts/{id}` | Déconnecter et supprimer la session |
 | POST | `/api/accounts/{id}/login/start` · `/status` · `/finish` · `/cancel` | Connexion manuelle noVNC (voir §10) |
 | POST | `/api/accounts/{id}/test` | Tester la validité de la session |
 | POST | `/api/auth/forgot` · `/api/auth/reset` | Mot de passe oublié (voir §8) |
+| GET/POST | `/api/organizations` | Lister / créer les organisations accessibles |
+| GET | `/api/organizations/current` | Organisation active et rôle courant |
+| GET | `/api/organizations/current/usage` | Consommation, quotas et rétention de l'organisation active |
+| GET/POST | `/api/organizations/current/members` | Lister / ajouter les membres (admin) |
+| PATCH/DELETE | `/api/organizations/current/members/{id}` | Modifier le rôle / retirer un membre (admin) |
+| GET/POST | `/api/organizations/current/invitations` | Lister / envoyer les invitations actives (admin) |
+| DELETE | `/api/organizations/current/invitations/{id}` | Révoquer une invitation (admin) |
+| GET/POST | `/api/auth/invitations/{token}` · `/accept` | Vérifier / accepter une invitation |
 
-Ces routes couvrent déjà tous les besoins du frontend de la Phase 2
+Toutes les routes de comptes, cibles, exécutions, captures et planification sont
+filtrées par l'organisation active (`X-Organization-ID`, sélectionné
+automatiquement par l'interface). Les routes couvrent les besoins du frontend
 (gestion des URL, horaires, historique, captures, erreurs) ainsi que les comptes
 connectés et la réinitialisation de mot de passe.
 
@@ -331,9 +454,19 @@ connectés et la réinitialisation de mot de passe.
 
 ---
 
-## 7. Interface web (Phase 2)
+## 7. Interface web (v1.8.3)
 
-Ouvrez http://localhost:3000. Quatre vues, aucune configuration.
+Ouvrez http://localhost:3000. Cinq vues, aucune configuration.
+
+L'interface v1.8 adopte une direction sobre et éditoriale : noir profond,
+ivoire chaud, accent bordeaux, titres en Cormorant Garamond et interface en
+Inter. Les polices sont embarquées dans l'image frontend, sans appel à un
+service externe. La navigation reste compacte, les tableaux sont lisibles sur
+petit écran et les animations respectent `prefers-reduced-motion`. Les boutons
+ont une zone cliquable confortable, des coins modérément arrondis et des états
+survol, appui, focus et désactivé clairement différenciés. La Planche conserve
+désormais toute la hauteur de chaque capture dans sa vignette et permet de la
+faire défiler verticalement, au lieu de recadrer l'aperçu au premier écran.
 
 **Planche du jour** — les captures du jour en planche contact. Chaque exécution
 occupe un cadre : une réussite montre sa vignette, un échec montre un cadre
@@ -354,6 +487,24 @@ la sécurité en §10.
 Un clic ouvre le détail : journal étape par étape, capture en pleine taille,
 message technique complet.
 
+**Équipe** — visible aux propriétaires et administrateurs. Elle envoie une
+invitation valable 7 jours, permet de suivre les invitations en attente et de
+les révoquer. Le destinataire crée son compte depuis le lien ou confirme le mot
+de passe de son compte existant, puis rejoint automatiquement l'organisation.
+Le rôle `viewer` consulte sans modifier, `member` peut gérer et lancer les
+cibles, et `admin` gère aussi les comptes connectés et les membres. Le
+propriétaire ne peut pas être retiré. Quand Google Drive est actif, cette vue
+permet aussi d'en tester l'accès en écriture. Elle présente également les
+quotas de comptes, cibles, captures quotidiennes, stockage et la durée de
+rétention de l'espace actif.
+
+Le sélecteur en haut de la barre latérale change d'organisation. Les comptes,
+cibles, exécutions, captures, tâches planifiées et profils Chromium sont
+cloisonnés. Les nouvelles captures sont rangées sous
+`captures/organization-<id>/<site>/`. Les anciens profils persistants sont
+déplacés automatiquement dans leur espace isolé lors de leur première
+utilisation.
+
 ### Choix techniques
 
 | Point | Décision |
@@ -361,8 +512,8 @@ message technique complet.
 | Communication | nginx relaie `/api` vers le backend : une seule origine, **aucune URL à configurer**, pas de CORS |
 | Erreurs | Les messages Playwright bruts sont traduits en français (`resumeErreur`) ; la trace complète reste dans le détail |
 | Vignettes | Générées par Pillow à la capture. La page Facebook passe de 188 Ko à 14 Ko — sans quoi la planche fige le navigateur |
-| Polices | Aucune police distante : le monospace système porte l'identité. Fonctionne derrière un pare-feu |
-| Dépendances | React et rien d'autre. Le routage tient en quinze lignes |
+| Polices | Cormorant Garamond + Inter auto-hébergées avec Fontsource : aucune requête distante, fonctionnement derrière un pare-feu |
+| Dépendances | React, Fontsource et aucun framework d'interface. Le routage reste local et léger |
 
 **Compte** — un menu en bas de la barre latérale donne accès au changement de
 mot de passe, aux mentions légales et à la déconnexion.
@@ -389,10 +540,12 @@ mot de passe oublié (`/api/auth/forgot`, `/api/auth/reset`).
 | Force brute | 5 tentatives par IP et par compte sur 5 minutes, puis `429`. |
 | Changement de mot de passe | Révoque toutes les autres sessions. Imposé tant que le mot de passe généré n'a pas été changé. |
 | Mot de passe oublié | Lien de réinitialisation **à usage unique et daté** (voir ci-dessous), envoyé par mail. Seule l'empreinte du jeton est stockée. |
-| Clé API | `API_KEY` donne un accès machine-à-machine à l'API (scripts, CI), **sans compte**. Sans rapport avec les comptes utilisateurs. |
-| Anti-SSRF | Toute URL de cible est validée (`app/services/ssrf.py`) **à la création/modification** *et* **juste avant chaque capture** (protège d'un DNS qui changerait entre-temps) : rejette boucle locale, réseaux privés, lien-local (metadata cloud `169.254.169.254`), suffixes `.local`/`.internal`. Liste blanche de domaines optionnelle (`ALLOWED_DOMAINS`). |
-| Documentation API | `/docs`, `/redoc`, `/openapi.json` exigent une session (ou `X-Api-Key`) via le relais nginx — ils ne divulguent plus le schéma complet à un visiteur anonyme. |
-| Audit | Connexion/déconnexion (succès **et échec**), changement/réinitialisation de mot de passe, création/modification/suppression de cible, et toutes les actions sur les comptes connectés sont journalisées dans `audit_log` (jamais de secret dans le détail). |
+| Clé API | `API_KEY` agit au nom du compte réel `API_KEY_USER_EMAIL` (repli : `ADMIN_EMAIL`). Elle conserve l'accès autorisé aux comptes Facebook/noVNC, avec exactement les mêmes contrôles de propriété. Plus aucun utilisateur artificiel `id=0`. |
+| Anti-SSRF | URL initiale, redirections et sous-requêtes Chromium sont revalidées. Le proxy Squid interne refuse également les IP privées, loopback, lien-local, metadata cloud et plages réservées sur l'adresse effectivement résolue, ce qui couvre le DNS rebinding. |
+| Backend | Le port `8000` est seulement exposé sur le réseau Docker. L'unique entrée publique est nginx. |
+| IP réelle | nginx remplace `X-Forwarded-For` et FastAPI ne l'accepte que depuis `TRUSTED_PROXY_CIDRS`. L'audit et l'anti-brute-force utilisent ainsi l'IP du client réel. |
+| Documentation API | En développement, `/docs`, `/redoc`, `/openapi.json` exigent une session ou `X-Api-Key` via nginx. Avec `ENVIRONMENT=production`, ces routes sont désactivées dans FastAPI. |
+| Audit | Connexion/déconnexion, changement/réinitialisation de mot de passe, gestion des cibles, actions sur les comptes et contrôle manuel d'une session sont journalisés dans `audit_log`, sans secret. |
 
 Routes : `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`,
 `POST /api/auth/password`, `POST /api/auth/forgot`, `POST /api/auth/reset`.
@@ -415,6 +568,7 @@ une page où l'on choisit un nouveau mot de passe.
 ```env
 PUBLIC_URL=http://localhost:3000      # base du lien (domaine HTTPS sur VPS)
 RESET_TOKEN_MINUTES=60
+INVITATION_DAYS=7
 SMTP_HOST=smtp.exemple.com            # vide = aucun envoi (voir ci-dessous)
 SMTP_PORT=587
 SMTP_USER=compte@exemple.com
@@ -427,6 +581,8 @@ SMTP_FROM=no-reply@exemple.com        # à défaut, SMTP_USER
 > de réinitialisation est écrit **dans les journaux**, ce qui permet de tester
 > en local sans serveur mail —
 > `docker compose logs backend | grep -A8 "E-MAIL NON ENVOYÉ"`.
+> Les invitations créées depuis l'écran **Équipe** affichent aussi leur lien
+> local avec un bouton « Copier ».
 
 L'adresse du compte doit être une **vraie boîte mail** pour recevoir le lien
 (l'`admin@local` par défaut n'en est pas une). Le lien pointe vers
@@ -519,20 +675,29 @@ qui lui sont liées. Le parcours :
    (`account_id`). À chaque capture, la page est alors ouverte **connectée** — le
    journal de l'exécution indique *« Session du compte … chargée »*.
 
+Après chaque capture, FaithBook exporte les cookies éventuellement renouvelés
+par Facebook, actualise la copie `storage_state`, puis rescelle le profil
+Chromium dans son coffre chiffré. Un verrou propre à chaque profil empêche une
+capture, un test de session et une connexion noVNC d'ouvrir le même coffre au
+même moment. Cela ne supprime pas l'accès noVNC : une reconnexion manuelle reste
+possible depuis l'onglet **Comptes** dès que l'opération en cours est terminée.
+
 | Action (onglet Comptes) | Effet |
 |---|---|
-| **Tester** | Rouvre la session en arrière-plan et indique son état : `connecté`, `session expirée`, `vérification requise` (2FA/checkpoint). |
+| **Tester** | Rouvre la session en arrière-plan et indique son état : `connecté`, `déconnecté`, `session expirée`, `vérification requise` (2FA/checkpoint). |
 | **Reconnecter** | Relance la connexion manuelle (session expirée, mot de passe changé…). |
 | **Supprimer** | Efface le coffre chiffré et détache les cibles (sans les supprimer). |
 
 Sécurité : aucun mot de passe n'est lu ni stocké. La clé de chiffrement vient de
 `SESSION_ENCRYPTION_KEY` (ou d'un fichier `data/.session_key` généré au premier
-démarrage — **à déplacer en variable d'environnement en production**, sinon les
-sessions chiffrées deviennent illisibles si le fichier est perdu).
+démarrage en développement). La génération locale est atomique, même avec
+plusieurs requêtes concurrentes. Avec `ENVIRONMENT=production`, le backend
+refuse de démarrer sans `SESSION_ENCRYPTION_KEY`.
 
 > **Écran noVNC protégé par un jeton à usage court (Phase 1a).** `/novnc/` et
 > `/websockify` sont gardés par nginx (`auth_request`) : l'accès exige (1) une
-> session FaithBook valide **et** (2) un jeton à usage court posé en cookie
+> session FaithBook valide (ou la clé API rattachée au même propriétaire)
+> **et** (2) un jeton à usage court posé en cookie
 > `HttpOnly` par `POST /login/start`, régénéré à chaque connexion et invalidé
 > à la fin (`login/finish`/`login/cancel`) ou après `NOVNC_TOKEN_TTL_MINUTES`
 > (10 min par défaut). Le jeton est en plus lié à l'utilisateur qui a démarré
@@ -551,7 +716,7 @@ l'interface :
 ```bash
 pip install playwright && playwright install chromium
 python scripts/login_session.py --url https://www.facebook.com/ --push 1
-curl http://localhost:8020/api/targets/1/session    # etat + date d'expiration
+curl http://localhost:3000/api/targets/1/session    # etat + date d'expiration
 ```
 
 `session_profile` crée un profil Chromium persistant dans `data/profiles/` : les
@@ -564,11 +729,11 @@ toute nouvelle valeur écrite via `PUT /api/targets/{id}/session`.
 
 ### Points de vigilance à connaître
 
-- **La session expire** (quelques semaines). `fail_if_url_contains` fait alors
-  échouer l'exécution avec un message explicite au lieu d'archiver
-  silencieusement des murs de connexion pendant des semaines. L'onglet **Comptes**
-  (bouton **Tester**) et la colonne *Session* de l'onglet **Cibles** signalent une
-  session expirée ou expirant bientôt ; il suffit alors de **Reconnecter**.
+- **La session expire** (quelques semaines). La détection du mur de connexion
+  suspend l'exécution avec un message explicite au lieu de l'archiver ou de
+  réessayer inutilement. L'onglet **Comptes** affiche l'expiration estimée et le
+  contrôle quotidien prévient `SESSION_EXPIRY_WARNING_DAYS` jours avant une
+  échéance connue ; il suffit alors de **Reconnecter**.
 - **Conditions d'utilisation de Facebook** : l'accès automatisé n'est pas prévu
   par leurs CGU. Un usage à faible fréquence (1 capture/jour/page) reste discret,
   mais le risque de blocage temporaire du compte utilisé n'est pas nul. Il est
@@ -592,12 +757,22 @@ docker compose exec backend python -m pytest tests/ -v
 
 | Fichier | Couvre |
 |---|---|
-| `tests/test_ssrf.py` | Anti-SSRF : boucle locale, réseaux privés, metadata cloud, `.internal`/`.local`, liste blanche, `ALLOW_PRIVATE_TARGETS` |
-| `tests/test_crypto.py` | Chiffrement Fernet (roundtrip, donnée corrompue), coffre de profil (`open_profile`/`seal_profile`) |
+| `tests/test_ssrf.py` | Anti-SSRF : boucle locale, réseaux privés, metadata cloud, liste blanche, redirection et sous-requête navigateur |
+| `tests/test_crypto.py` | Chiffrement Fernet, coffre de profil, génération concurrente atomique, clé obligatoire en production |
 | `tests/test_session_state.py` | Déchiffrement transparent du `storage_state_json` (valeur chiffrée, repli legacy en clair, donnée illisible) |
 | `tests/test_login_authorize.py` | `LoginManager.authorize()` : jeton correct/incorrect, expiré, isolation entre utilisateurs |
 | `tests/test_audit.py` | Le journal d'audit écrit et relit correctement, sans fuite quand `user=None` |
-| `tests/test_api_security.py` | Intégration FastAPI `TestClient` : SSRF à la création/modification de cible, gate `/api/auth/check`, gate `/api/accounts/novnc/authorize` (y compris **isolation entre deux utilisateurs réels**), audit d'un échec de connexion |
+| `tests/test_api_security.py` | SSRF, gates nginx, isolation noVNC, audit des connexions et du contrôle de session |
+| `tests/test_api_key_identity.py` | Clé API liée à un utilisateur réel, accès Facebook/noVNC conservé, isolation entre propriétaires |
+| `tests/test_client_ip.py` | IP réelle acceptée uniquement depuis un proxy de confiance |
+| `tests/test_deployment_security.py` | Backend non publié, ACL du proxy sortant et suppression du PID Squid périmé au démarrage |
+| `tests/test_session_robustness.py` | Verrou de profil, statut déconnecté, suspension sans retry et rotation des cookies |
+| `tests/test_ops_phase1c.py` | Sauvegarde SQLite/PostgreSQL, chiffrement, contrôle d'intégrité, restauration et CI |
+| `tests/test_run_queue.py` | Mise en file Redis et verrou anti-concurrence par cible |
+| `tests/test_legacy_migration.py` | Conservation des données lors de la migration SQLite, y compris depuis un ancien schéma |
+| `tests/test_capture_scroll.py` | Défilement progressif, stabilisation des pages dynamiques et limite des fils infinis |
+| `tests/test_drive.py` | Dossiers datés, Drive partagé, upload reprenable, déduplication et reprise sans recapture |
+| `tests/test_quotas.py` | Consommation, limites comptes/cibles/captures/stockage, course entre workers et rétention isolée |
 
 `tests/conftest.py` isole totalement les tests de la base et des fichiers
 réels du conteneur (base SQLite temporaire, clé de chiffrement générée,
@@ -610,7 +785,7 @@ puis handshake WebSocket `101`).
 ### Smoke test (bout en bout, conteneurs réels)
 
 ```bash
-API_KEY=... bash scripts/run_tests.sh 8020 3000   # ou SMOKE_PASSWORD=...
+API_KEY=... bash scripts/run_tests.sh 3000   # ou SMOKE_PASSWORD=...
 ```
 
 | Suite | Couvre |
@@ -618,8 +793,22 @@ API_KEY=... bash scripts/run_tests.sh 8020 3000   # ou SMOKE_PASSWORD=...
 | `scripts/smoke_test.py` | API réelle : création de cible, planification, capture, dossier par site, PNG, doublon, `force=true`, échec après 3 tentatives (URL réelle à port fermé, pour ne pas être intercepté plus tôt par le garde anti-SSRF) |
 | Vérifs interface | Page servie, relais `/api` par nginx, route profonde (`/historique`) |
 
-Les tests de l'intégration Drive sont dans [tests/suspendu/](tests/suspendu/) et
-ne sont plus joués par défaut (voir §2).
+### Validation locale complète
+
+Cette commande contrôle Compose, reconstruit les images, attend les
+healthchecks, exécute pytest dans le backend et vérifie le frontend :
+
+```powershell
+python scripts\validate_local.py
+```
+
+Après une première construction, `--skip-build` accélère la vérification.
+`--smoke` ajoute le scénario réel de capture si `API_KEY` ou
+`SMOKE_PASSWORD` est défini dans l'environnement.
+
+La CI définie dans `.github/workflows/ci.yml` exécute séparément les tests
+backend, le build frontend et la validation Compose à chaque push et pull
+request.
 
 ---
 
@@ -627,6 +816,10 @@ ne sont plus joués par défaut (voir §2).
 
 Le schéma est versionné avec **Alembic**. Les migrations s'appliquent
 automatiquement au démarrage du conteneur — rien à lancer à la main.
+
+La migration v1.3.0 crée une organisation par utilisateur existant et rattache
+automatiquement tous les comptes et toutes les cibles déjà présents. Aucune
+capture ni session Facebook/noVNC n'est supprimée.
 
 ```bash
 docker exec capture-backend alembic current    # révision appliquée
@@ -647,19 +840,95 @@ docker compose up -d --build
 > démarrage (`no such column`). En développement on efface la base ; avec des
 > données réelles, ce n'est pas une option.
 
-### Passer à PostgreSQL (préparation SaaS)
+### PostgreSQL et migration de l'ancienne base
 
-Le driver `psycopg` est déjà installé et le code n'a aucune requête spécifique
-à SQLite. Le changement est **uniquement de la configuration** :
+PostgreSQL 17 est maintenant la base active de Compose. Au premier démarrage
+de la v1.5.2 :
+
+1. Alembic crée le schéma PostgreSQL à jour.
+2. Si PostgreSQL est vide et que `data/app.db` existe, toutes les lignes SQLite
+   sont copiées dans une transaction.
+3. Les séquences d'identifiants sont recalées.
+4. `data/app.db` reste intacte : aucune donnée historique n'est supprimée.
+
+La migration conserve utilisateurs, organisations, cibles, historique,
+invitations, sessions applicatives et références des sessions Facebook. Les
+coffres chiffrés et captures restent dans leurs dossiers existants.
+
+La migration v1.6.0 ajoute le suivi des envois Drive (`pending`, `uploaded`,
+`failed`, erreur, date et prochaine reprise). La copie depuis une ancienne
+SQLite ne lit que les colonnes réellement présentes : les données v1.5.x
+restent donc migrables sans modification manuelle.
+
+La migration v1.7.0 ajoute à chaque organisation ses quotas et sa durée de
+rétention. Les espaces existants reçoivent les valeurs par défaut sans modifier
+leurs membres, cibles, comptes, sessions Facebook, captures ni références
+Google Drive.
+
+La v1.5.2 attend que Xvfb accepte réellement les connexions avant de lancer
+x11vnc. Elle évite ainsi un écran noVNC « Échec de connexion au serveur »
+provoqué par une course au démarrage du conteneur.
+
+Configuration locale par défaut :
 
 ```env
-DATABASE_URL=postgresql+psycopg://user:motdepasse@db:5432/captures
+POSTGRES_DB=faithbook
+POSTGRES_USER=faithbook
+POSTGRES_PASSWORD=faithbook-local-change-me
 ```
 
-Puis ajouter un service `db` dans `docker-compose.yml`. Les migrations
-s'appliqueront au premier démarrage. Recommandé dès qu'il y a plusieurs
-utilisateurs simultanés : SQLite tient bien la charge d'un usage mono-poste,
-mais sérialise les écritures.
+Avant un VPS, remplacer le mot de passe et renseigner au besoin
+`POSTGRES_DATABASE_URL` avec un mot de passe encodé comme URL.
+
+### Redis et worker de captures
+
+L'API ne lance plus Chromium dans son propre processus. Elle crée une exécution
+`pending`, réserve la cible dans Redis et place le run dans une file persistante.
+Le conteneur `faithbook-worker` récupère le message, exécute la capture et met à
+jour PostgreSQL.
+
+- Une seule capture simultanée par cible.
+- Liste `processing` séparée : un message réservé n'est acquitté qu'après
+  traitement.
+- Après un arrêt du worker, les messages interrompus sont remis en file.
+- Le healthcheck expose `redis_ok`, `worker_alive`, `queue_depth` et
+  `database_backend`.
+
+### Sauvegarde et restauration
+
+Lorsque PostgreSQL tourne, la sauvegarde appelle `pg_dump` dans le conteneur
+`db`. Pour une ancienne installation SQLite, elle conserve le mécanisme de
+copie cohérente existant. L'archive contient également les profils Facebook
+chiffrés, la clé locale et `.env`, puis elle est chiffrée en AES-GCM.
+
+```powershell
+python scripts\backup.py
+```
+
+Le fichier est créé dans `backups\faithbook-AAAAMMJJ-HHMMSS.fbk`. Le mot de
+passe demandé n'est pas enregistré. Pour une tâche planifiée :
+
+```powershell
+$env:FAITHBOOK_BACKUP_PASSPHRASE="un-mot-de-passe-long-et-unique"
+python scripts\backup.py
+Remove-Item Env:FAITHBOOK_BACKUP_PASSPHRASE
+```
+
+Les captures et `secrets` sont exclus par défaut. Les options
+`--include-captures` et `--include-secrets` les ajoutent.
+
+Restauration :
+
+```powershell
+docker compose down
+python scripts\restore.py "backups\faithbook-AAAAMMJJ-HHMMSS.fbk"
+docker compose up -d --wait
+```
+
+Le script vérifie tous les SHA-256 avant d'écrire, refuse de travailler si les
+conteneurs tournent et crée automatiquement une sauvegarde `pre-restore`.
+Par sécurité, `.env`, les captures et `secrets` ne sont pas écrasés sans
+`--restore-env`, `--restore-captures` ou `--restore-secrets`.
 
 ---
 
@@ -679,16 +948,24 @@ docker compose up -d --build
 | Variable | Local | VPS |
 |---|---|---|
 | `OUTPUT_DIR` | `./captures` | `/var/captures` |
-| `API_PORT` | `8020` | `8000` derrière un reverse-proxy HTTPS |
 | `FRONTEND_PORT` | `3000` | `80`/`443` derrière un reverse-proxy HTTPS |
 | `API_KEY` | vide | **à renseigner** (active `X-API-Key`) |
+| `API_KEY_USER_EMAIL` | `admin@local` | compte réel propriétaire utilisé par les intégrations |
+| `ENVIRONMENT` | `development` | `production` |
+| `SESSION_ENCRYPTION_KEY` | génération locale possible | **obligatoire** et sauvegardée |
+| `POSTGRES_PASSWORD` | mot de passe local à remplacer | secret fort, jamais publié |
+| `REDIS_URL` | `redis://redis:6379/0` | réseau Docker privé |
+| `BROWSER_PROXY_URL` | proxy Squid interne | proxy Squid interne |
+| `TRUSTED_PROXY_CIDRS` | réseau nginx Docker | uniquement les réseaux des reverse-proxys de confiance |
 | `CORS_ORIGINS` | `*` | domaine du frontend |
-| `PUBLIC_URL` | `http://localhost:3000` | domaine HTTPS du frontend (lien des mails de réinitialisation) |
-| `SMTP_*` | vide (lien journalisé) | serveur SMTP réel pour envoyer les mails de réinitialisation |
+| `PUBLIC_URL` | `http://localhost:3000` | domaine HTTPS du frontend (réinitialisation et invitations) |
+| `INVITATION_DAYS` | `7` | durée de validité d'une invitation |
+| `SMTP_*` | vide (lien journalisé) | serveur SMTP réel pour envoyer les mails et invitations |
 | `TIMEZONE` | `Africa/Casablanca` | idem |
 
-Ce qu'il faut sauvegarder : `./data` (base + journaux) et le contenu de
-`OUTPUT_DIR` (les captures).
+Utiliser `python scripts/backup.py` pour la base, les sessions et la clé. Les
+captures peuvent être ajoutées avec `--include-captures` ou sauvegardées
+séparément depuis `OUTPUT_DIR`.
 
 Pour récupérer les captures depuis le VPS, `OUTPUT_DIR` peut pointer vers un
 montage réseau ou un dossier synchronisé — toujours sans toucher au code.

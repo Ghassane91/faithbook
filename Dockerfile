@@ -31,9 +31,24 @@ COPY requirements.txt .
 RUN pip install --break-system-packages --ignore-installed -r requirements.txt
 
 COPY alembic.ini .
+COPY pytest.ini .
 COPY migrations ./migrations
 COPY app ./app
 COPY tests ./tests
+COPY scripts ./scripts
+# Artefacts lus par les tests d'exploitation Phase 1c. Ils sont copiés dans
+# l'image afin que la même suite pytest fonctionne sur l'hôte et dans Docker.
+COPY Dockerfile ./Dockerfile
+COPY .github/workflows/ci.yml ./.github/workflows/ci.yml
+# Ces deux fichiers sont lus par les tests de securite du deploiement. Ils sont
+# copies en lecture seule dans l'image afin que la meme commande pytest
+# fonctionne en local et dans le conteneur.
+COPY docker-compose.yml ./docker-compose.yml
+COPY proxy/squid.conf ./proxy/squid.conf
+COPY proxy/Dockerfile ./proxy/Dockerfile
+# Lu par les tests d'exploitation exécutés depuis /app dans le conteneur.
+# La seconde copie est l'entrypoint réellement exécuté.
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

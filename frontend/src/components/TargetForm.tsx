@@ -4,6 +4,7 @@ import type { Account, Target, TargetInput } from '../types'
 
 interface Props {
   cible: Target | null // null = création
+  canDelete: boolean
   onClose: () => void
   onSaved: () => void
 }
@@ -50,7 +51,7 @@ const PRESET_FACEBOOK: TargetInput = {
   session_profile: 'facebook',
 }
 
-export function TargetForm({ cible, onClose, onSaved }: Props) {
+export function TargetForm({ cible, canDelete, onClose, onSaved }: Props) {
   const [form, setForm] = useState<TargetInput>(cible ?? VIDE)
   const [erreur, setErreur] = useState<string | null>(null)
   const [envoi, setEnvoi] = useState(false)
@@ -418,7 +419,7 @@ export function TargetForm({ cible, onClose, onSaved }: Props) {
           </div>
 
           {/* La suppression vit ici, à l'écart des actions courantes du tableau. */}
-          {cible && (
+        {cible && canDelete && (
             <div className="section" style={{ marginTop: 30 }}>
               <h3>Supprimer cette cible</h3>
               {!confirmeSuppression ? (

@@ -4,6 +4,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 
@@ -38,13 +39,17 @@ class DriveClient:
     """Client Google Drive (compte de service).
 
     Rappel important : un compte de service n'a pas de quota de stockage propre.
-    Le dossier parent doit donc etre soit un dossier de votre Drive partage avec
-    l'adresse du compte de service, soit un dossier d'un Drive partage (Shared Drive).
+    Un Drive partagé est donc recommandé ; l'autre option est la délégation
+    d'autorité à l'échelle du domaine Google Workspace.
     """
 
     def __init__(self) -> None:
         self._service = None
-        self._lock = threading.Lock()
+        self._service_lock = threading.Lock()
+        # googleapiclient/httplib2 n'est pas garanti thread-safe. Le backend
+        # peut exécuter en même temps un contrôle manuel et une reprise
+        # automatique : toutes les opérations d'un client sont donc sérialisées.
+        self._api_lock = threading.RLock()
 
     # -- infra -------------------------------------------------------------
     def is_configured(self) -> bool:
@@ -57,7 +62,7 @@ class DriveClient:
     def _get_service(self):
         if self._service is not None:
             return self._service
-        with self._lock:
+        with self._service_lock:
             if self._service is not None:
                 return self._service
             if not self.is_configured():
@@ -87,63 +92,89 @@ class DriveClient:
 
     # -- operations --------------------------------------------------------
     def check_access(self) -> dict:
-        """Verifie que le dossier parent est accessible. Leve une exception sinon."""
-        service = self._get_service()
-        meta = (
-            service.files()
-            .get(
-                fileId=settings.google_drive_parent_folder_id,
-                fields="id,name,mimeType",
-                **self._shared_drive_kwargs,
+        """Vérifie que le dossier parent est accessible et accepte des enfants."""
+        with self._api_lock:
+            service = self._get_service()
+            meta = (
+                service.files()
+                .get(
+                    fileId=settings.google_drive_parent_folder_id,
+                    fields="id,name,mimeType,capabilities(canAddChildren)",
+                    **self._shared_drive_kwargs,
+                )
+                .execute(num_retries=settings.google_drive_api_retries)
             )
-            .execute()
-        )
+        if meta.get("mimeType") != FOLDER_MIME:
+            raise DriveNotConfigured(
+                "GOOGLE_DRIVE_PARENT_FOLDER_ID ne désigne pas un dossier."
+            )
+        if not meta.get("capabilities", {}).get("canAddChildren", False):
+            raise DriveNotConfigured(
+                "Le compte de service ne peut pas écrire dans le dossier parent."
+            )
         return meta
 
     def ensure_folder(self, name: str, parent_id: str | None = None) -> str:
         """Retourne l'ID du dossier `name` sous `parent_id`, en le creant si besoin."""
-        service = self._get_service()
-        parent = parent_id or settings.google_drive_parent_folder_id
-        safe_name = escape_query_value(name)
-        query = (
-            f"name = '{safe_name}' and mimeType = '{FOLDER_MIME}' "
-            f"and '{parent}' in parents and trashed = false"
-        )
-        found = (
-            service.files()
-            .list(q=query, fields="files(id,name)", pageSize=1, **self._list_kwargs())
-            .execute()
-        )
-        files = found.get("files", [])
-        if files:
-            return files[0]["id"]
-
-        created = (
-            service.files()
-            .create(
-                body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent]},
-                fields="id",
-                **self._shared_drive_kwargs,
+        with self._api_lock:
+            service = self._get_service()
+            parent = parent_id or settings.google_drive_parent_folder_id
+            safe_name = escape_query_value(name)
+            query = (
+                f"name = '{safe_name}' and mimeType = '{FOLDER_MIME}' "
+                f"and '{parent}' in parents and trashed = false"
             )
-            .execute()
-        )
+            found = (
+                service.files()
+                .list(
+                    q=query,
+                    fields="files(id,name)",
+                    pageSize=10,
+                    orderBy="createdTime",
+                    **self._list_kwargs(),
+                )
+                .execute(num_retries=settings.google_drive_api_retries)
+            )
+            files = found.get("files", [])
+            if files:
+                return files[0]["id"]
+
+            created = (
+                service.files()
+                .create(
+                    body={
+                        "name": name,
+                        "mimeType": FOLDER_MIME,
+                        "parents": [parent],
+                        "appProperties": {"faithbook": "folder"},
+                    },
+                    fields="id",
+                    **self._shared_drive_kwargs,
+                )
+                .execute(num_retries=settings.google_drive_api_retries)
+            )
         logger.info("Dossier Drive cree : %s (%s)", name, created["id"])
         return created["id"]
 
     def find_file(self, name: str, folder_id: str) -> dict | None:
-        service = self._get_service()
-        safe_name = escape_query_value(name)
-        query = f"name = '{safe_name}' and '{folder_id}' in parents and trashed = false"
-        found = (
-            service.files()
-            .list(
-                q=query,
-                fields="files(id,name,webViewLink,size)",
-                pageSize=1,
-                **self._list_kwargs(),
+        with self._api_lock:
+            service = self._get_service()
+            safe_name = escape_query_value(name)
+            query = (
+                f"name = '{safe_name}' and mimeType != '{FOLDER_MIME}' "
+                f"and '{folder_id}' in parents and trashed = false"
             )
-            .execute()
-        )
+            found = (
+                service.files()
+                .list(
+                    q=query,
+                    fields="files(id,name,webViewLink,size)",
+                    pageSize=10,
+                    orderBy="createdTime",
+                    **self._list_kwargs(),
+                )
+                .execute(num_retries=settings.google_drive_api_retries)
+            )
         files = found.get("files", [])
         return files[0] if files else None
 
@@ -151,30 +182,40 @@ class DriveClient:
         """Televerse le fichier ; si un fichier de meme nom existe deja, ne le duplique pas."""
         from googleapiclient.http import MediaFileUpload
 
-        service = self._get_service()
-        name = filename or path.name
+        if not path.is_file():
+            raise FileNotFoundError(f"Capture locale introuvable : {path}")
 
-        existing = self.find_file(name, folder_id)
-        if existing:
-            logger.info("Fichier deja present sur Drive, upload ignore : %s", name)
-            return UploadResult(
-                file_id=existing["id"],
-                folder_id=folder_id,
-                web_link=existing.get("webViewLink", ""),
-                deduplicated=True,
+        with self._api_lock:
+            service = self._get_service()
+            name = filename or path.name
+
+            existing = self.find_file(name, folder_id)
+            if existing:
+                logger.info("Fichier deja present sur Drive, upload ignore : %s", name)
+                return UploadResult(
+                    file_id=existing["id"],
+                    folder_id=folder_id,
+                    web_link=existing.get("webViewLink", ""),
+                    deduplicated=True,
+                )
+
+            media = MediaFileUpload(
+                str(path),
+                mimetype="image/png",
+                resumable=True,
+                chunksize=5 * 1024 * 1024,
             )
-
-        media = MediaFileUpload(str(path), mimetype="image/png", resumable=True)
-        created = (
-            service.files()
-            .create(
+            request = service.files().create(
                 body={"name": name, "parents": [folder_id]},
                 media_body=media,
                 fields="id,webViewLink",
                 **self._shared_drive_kwargs,
             )
-            .execute()
-        )
+            created: dict[str, Any] | None = None
+            while created is None:
+                _, created = request.next_chunk(
+                    num_retries=settings.google_drive_api_retries
+                )
         return UploadResult(
             file_id=created["id"],
             folder_id=folder_id,

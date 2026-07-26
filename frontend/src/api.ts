@@ -1,9 +1,16 @@
 import type {
   Account,
+  DriveCheck,
+  DriveRetry,
   Health,
   Job,
   LoginStatus,
   MetricsSeries,
+  InvitationPreview,
+  Organization,
+  OrganizationInvitation,
+  OrganizationMember,
+  OrganizationUsage,
   Run,
   RunSummary,
   SessionStatus,
@@ -15,6 +22,18 @@ import type {
 
 // Meme origine : nginx relaie /api vers le backend. Aucune URL a configurer.
 const BASE = '/api'
+const ORG_KEY = 'faithbook_organization_id'
+
+export function selectedOrganizationId(): number | null {
+  const raw = localStorage.getItem(ORG_KEY)
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+export function selectOrganization(id: number) {
+  localStorage.setItem(ORG_KEY, String(id))
+  document.cookie = `faithbook_org=${id}; Path=/; SameSite=Lax`
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -30,9 +49,14 @@ export function setUnauthorizedHandler(fn: () => void) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const organizationId = selectedOrganizationId()
   const res = await fetch(BASE + path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(organizationId ? { 'X-Organization-ID': String(organizationId) } : {}),
+      ...(init?.headers ?? {}),
+    },
   })
   if (!res.ok) {
     let detail = `Erreur ${res.status}`
@@ -74,7 +98,51 @@ export const api = {
     }),
 
   health: () => request<Health>('/health'),
+  checkDrive: () => request<DriveCheck>('/drive/check', { method: 'POST' }),
   jobs: () => request<Job[]>('/scheduler/jobs'),
+
+  organizations: () => request<Organization[]>('/organizations'),
+  organizationUsage: () =>
+    request<OrganizationUsage>('/organizations/current/usage'),
+  createOrganization: (name: string) =>
+    request<Organization>('/organizations', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  organizationMembers: () =>
+    request<OrganizationMember[]>('/organizations/current/members'),
+  addOrganizationMember: (email: string, role: string) =>
+    request<OrganizationMember>('/organizations/current/members', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+  organizationInvitations: () =>
+    request<OrganizationInvitation[]>('/organizations/current/invitations'),
+  createOrganizationInvitation: (email: string, role: string) =>
+    request<OrganizationInvitation>('/organizations/current/invitations', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+  revokeOrganizationInvitation: (invitationId: number) =>
+    request<void>(`/organizations/current/invitations/${invitationId}`, {
+      method: 'DELETE',
+    }),
+  updateOrganizationMember: (membershipId: number, role: string) =>
+    request<OrganizationMember>(`/organizations/current/members/${membershipId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  removeOrganizationMember: (membershipId: number) =>
+    request<void>(`/organizations/current/members/${membershipId}`, {
+      method: 'DELETE',
+    }),
+  invitationPreview: (token: string) =>
+    request<InvitationPreview>(`/auth/invitations/${encodeURIComponent(token)}`),
+  acceptInvitation: (token: string, password: string) =>
+    request<User>('/auth/invitations/accept', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    }),
 
   targets: () => request<Target[]>('/targets'),
   target: (id: number) => request<Target>(`/targets/${id}`),
@@ -110,6 +178,8 @@ export const api = {
     return request<{ total: number; items: RunSummary[] }>(`/runs?${q}`)
   },
   run: (id: number) => request<Run>(`/runs/${id}`),
+  retryDrive: (id: number) =>
+    request<DriveRetry>(`/runs/${id}/drive/retry`, { method: 'POST' }),
   screenshotUrl: (id: number) => `${BASE}/runs/${id}/screenshot`,
   thumbnailUrl: (id: number) => `${BASE}/runs/${id}/thumbnail`,
 }

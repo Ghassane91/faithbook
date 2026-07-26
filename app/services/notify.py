@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import session_scope
 from app.models import Account, AccountStatus, Run, RunStatus, Target, User, utcnow
-from app.services import mailer, session_check
+from app.services import mailer, session_check, session_state
 from app.services.login_browser import login_manager
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ STATUS_FR = {
 ACCOUNT_FR = {
     AccountStatus.connected: "connecté",
     AccountStatus.never: "jamais connecté",
+    AccountStatus.disconnected: "déconnecté",
     AccountStatus.expired: "session expirée",
     AccountStatus.verification_required: "vérification requise (2FA/checkpoint)",
     AccountStatus.error: "erreur",
@@ -86,6 +87,22 @@ def notify_change(target: Target, run: Run, prev: Run) -> None:
     _send(f"FaithBook — « {target.name} » a changé ({pct} %)", body)
 
 
+def notify_session_suspended(target: Target, run: Run, account: Account | None) -> None:
+    """Alerte immédiate lorsqu'une capture attend une reconnexion ou une 2FA."""
+    nom_compte = account.name if account else "compte lié"
+    lien = f"{settings.public_url.rstrip('/')}/#/comptes"
+    body = (
+        "La capture a été suspendue sans nouvel essai automatique, car la "
+        "session connectée demande une intervention.\n\n"
+        f"Cible  : {target.name}\n"
+        f"Compte : {nom_compte}\n"
+        f"État   : {run.session_status or 'déconnecté'}\n"
+        f"Détail : {(run.error_message or 'reconnexion requise')[:500]}\n\n"
+        f"Reconnectez le compte ici : {lien}\n\n— FaithBook"
+    )
+    _send(f"FaithBook — capture suspendue : {target.name}", body)
+
+
 # --- 2. Verification quotidienne des sessions ------------------------------
 async def check_all_sessions() -> None:
     """Teste chaque compte connecté et alerte si une session est à reconnecter.
@@ -93,11 +110,15 @@ async def check_all_sessions() -> None:
     Un seul mail récapitulatif, uniquement s'il y a un problème.
     """
     problemes: list[str] = []
+    expirations: list[str] = []
     with session_scope() as s:
         accounts = s.scalars(select(Account)).all()
-        infos = [(a.id, a.name, a.profile_slug, a.platform) for a in accounts]
+        infos = [
+            (a.id, a.name, a.profile_slug, a.platform, a.encrypted_state)
+            for a in accounts
+        ]
 
-    for account_id, name, slug, platform in infos:
+    for account_id, name, slug, platform, encrypted_state in infos:
         if login_manager.active_account_id == account_id:
             continue  # connexion manuelle en cours : ne pas interférer
         try:
@@ -110,27 +131,54 @@ async def check_all_sessions() -> None:
             if account is None:
                 continue
             account.status = result["status"]
+            if result.get("encrypted_state"):
+                account.encrypted_state = result["encrypted_state"]
             account.last_verified_at = utcnow()
             account.last_error = (
-                result["detail"] if result["status"] == AccountStatus.error else None
+                None if result["status"] == AccountStatus.connected else result["detail"]
             )
             s.commit()
+            current_state = account.encrypted_state
         if result["status"] in (
+            AccountStatus.disconnected,
             AccountStatus.expired,
             AccountStatus.verification_required,
             AccountStatus.error,
         ):
             problemes.append(f"- {name} : {ACCOUNT_FR[result['status']]} — {result['detail']}")
+        if result["status"] == AccountStatus.connected:
+            _, expires_at = session_state.session_expiry(current_state)
+            if expires_at is not None:
+                remaining = expires_at - datetime.now(ZoneInfo("UTC"))
+                if timedelta(0) < remaining <= timedelta(
+                    days=settings.session_expiry_warning_days
+                ):
+                    days = max(0, remaining.days)
+                    expirations.append(
+                        f"- {name} : expiration estimée le {expires_at:%d/%m/%Y} "
+                        f"({days} jour(s))"
+                    )
         logger.info("Session '%s' testee : %s", name, result["status"].value)
 
-    if problemes:
+    if problemes or expirations:
         lien = f"{settings.public_url.rstrip('/')}/#/comptes"
-        body = (
-            "Le contrôle quotidien des comptes connectés a détecté :\n\n"
-            + "\n".join(problemes)
-            + f"\n\nReconnectez le(s) compte(s) ici : {lien}\n\n— FaithBook"
+        sections: list[str] = []
+        if problemes:
+            sections.append(
+                "Sessions nécessitant une intervention :\n\n" + "\n".join(problemes)
+            )
+        if expirations:
+            sections.append(
+                "Sessions proches de leur expiration estimée :\n\n"
+                + "\n".join(expirations)
+            )
+        body = "\n\n".join(sections) + f"\n\nGérer les comptes : {lien}\n\n— FaithBook"
+        sujet = (
+            "FaithBook — session(s) à reconnecter"
+            if problemes
+            else "FaithBook — session(s) bientôt expirée(s)"
         )
-        _send("FaithBook — session(s) à reconnecter", body)
+        _send(sujet, body)
 
 
 # --- 3. Rapport quotidien ---------------------------------------------------

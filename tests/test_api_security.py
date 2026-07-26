@@ -15,7 +15,10 @@ from fastapi.testclient import TestClient
 from app.database import session_scope
 from app.main import app
 from app.models import User
+from app.models import AccountStatus
 from app.services import auth
+from app.services import audit as audit_service
+from app.services import session_check
 from app.services.login_browser import LoginSession, login_manager
 
 
@@ -35,14 +38,14 @@ def test_creation_cible_url_metadata_cloud_refusee(auth_client):
     assert resp.status_code == 422
 
 
-def test_creation_cible_url_publique_acceptee(auth_client):
+def test_creation_cible_url_publique_acceptee(auth_client, public_example_dns):
     resp = auth_client.post(
         "/api/targets", json={"name": "site public", "url": "https://example.com/", "run_time": "09:00"}
     )
     assert resp.status_code == 201, resp.text
 
 
-def test_modification_cible_vers_url_interne_refusee(auth_client):
+def test_modification_cible_vers_url_interne_refusee(auth_client, public_example_dns):
     created = auth_client.post(
         "/api/targets", json={"name": "cible", "url": "https://example.com/", "run_time": "09:00"}
     ).json()
@@ -157,3 +160,31 @@ def test_novnc_authorize_refuse_un_autre_utilisateur_avec_le_bon_jeton():
         assert client_b.get("/api/accounts/novnc/authorize").status_code == 403
     finally:
         login_manager._active = None
+
+
+def test_controle_session_compte_est_audite(auth_client, monkeypatch):
+    created = auth_client.post(
+        "/api/accounts", json={"name": "Compte audit", "platform": "facebook"}
+    )
+    assert created.status_code == 201
+    account_id = created.json()["id"]
+
+    async def fake_check(_slug, _platform):
+        return {
+            "status": AccountStatus.connected,
+            "logged_in": True,
+            "final_url": "https://www.facebook.com/",
+            "detail": "Session active.",
+        }
+
+    monkeypatch.setattr(session_check, "check_account", fake_check)
+    response = auth_client.post(f"/api/accounts/{account_id}/test")
+    assert response.status_code == 200
+
+    with session_scope() as session:
+        entries = audit_service.recent(session, limit=20)
+        assert any(
+            entry.action == "account.session_test"
+            and f"compte #{account_id}" in (entry.detail or "")
+            for entry in entries
+        )

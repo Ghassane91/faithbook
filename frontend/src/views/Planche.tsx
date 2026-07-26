@@ -170,7 +170,10 @@ function Cadre({
           </span>
         )}
         {aUneImage ? (
-          <img src={api.thumbnailUrl(run.id)} alt={`Capture de ${nom}`} loading="lazy" decoding="async" />
+          <>
+            <img src={api.thumbnailUrl(run.id)} alt={`Capture complète de ${nom}`} loading="lazy" decoding="async" />
+            <span className="frame-scroll-hint">aperçu déroulant</span>
+          </>
         ) : (
           <div className="frame-empty">
             <span className="sign">{run.status === 'failed' ? '✕' : '–'}</span>

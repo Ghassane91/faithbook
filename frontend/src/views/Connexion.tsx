@@ -50,7 +50,7 @@ export function Connexion() {
         <div className="auth-brand">
           <span className="brand-mark">FaithBook</span>
           <span className="brand-sub">
-            {mode === 'login' ? 'captures planifiées' : 'mot de passe oublié'}
+            {mode === 'login' ? 'veille visuelle' : 'mot de passe oublié'}
           </span>
         </div>
 

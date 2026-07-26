@@ -6,12 +6,13 @@ import type { Account, AccountStatus, LoginStatus } from '../types'
 const STATUT: Record<AccountStatus, { label: string; tag: string }> = {
   connected: { label: 'connecté', tag: 'success' },
   never: { label: 'jamais connecté', tag: 'off' },
+  disconnected: { label: 'déconnecté', tag: 'failed' },
   expired: { label: 'session expirée', tag: 'failed' },
   verification_required: { label: 'vérification requise', tag: 'running' },
   error: { label: 'erreur', tag: 'failed' },
 }
 
-export function Comptes() {
+export function Comptes({ canAdmin }: { canAdmin: boolean }) {
   const { data: comptes, erreur, chargement, recharger } = useData(() => api.accounts(), [], 30000)
   const [nouveau, setNouveau] = useState('')
   const [message, setMessage] = useState<{ texte: string; type: 'info' | 'error' } | null>(null)
@@ -98,18 +99,20 @@ export function Comptes() {
         </div>
       </div>
 
-      <form className="inline-form" onSubmit={creer}>
-        <input
-          type="text"
-          placeholder="Nom du compte (ex. Facebook — page SPYPOINT)"
-          value={nouveau}
-          onChange={(e) => setNouveau(e.target.value)}
-          maxLength={200}
-        />
-        <button className="btn" disabled={occupe === -1 || !nouveau.trim()}>
-          {occupe === -1 ? <span className="spinner" /> : 'Ajouter un compte'}
-        </button>
-      </form>
+      {canAdmin && (
+        <form className="inline-form" onSubmit={creer}>
+          <input
+            type="text"
+            placeholder="Nom du compte (ex. Facebook — page SPYPOINT)"
+            value={nouveau}
+            onChange={(e) => setNouveau(e.target.value)}
+            maxLength={200}
+          />
+          <button className="btn" disabled={occupe === -1 || !nouveau.trim()}>
+            {occupe === -1 ? <span className="spinner" /> : 'Ajouter un compte'}
+          </button>
+        </form>
+      )}
 
       {message && <div className={`notice ${message.type}`}>{message.texte}</div>}
       {erreur && <div className="notice error">{erreur}</div>}
@@ -149,6 +152,11 @@ export function Comptes() {
                     </td>
                     <td>
                       <span className={`tag ${st.tag}`}>{st.label}</span>
+                      {c.session_expires_at && (
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>
+                          Expiration estimée : {dateHeure(c.session_expires_at)}
+                        </div>
+                      )}
                       {c.last_error && (
                         <div className="mono" style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 4 }}>
                           {c.last_error}
@@ -159,28 +167,32 @@ export function Comptes() {
                     <td className="cell-time">{dateHeure(c.last_verified_at)}</td>
                     <td>
                       <div className="btn-row">
-                        <button
-                          className="btn sm"
-                          disabled={occupe === c.id || login !== null}
-                          onClick={() => connecter(c)}
-                        >
-                          {occupe === c.id ? <span className="spinner" /> : c.has_session ? 'Reconnecter' : 'Connecter'}
-                        </button>
-                        <button
-                          className="btn ghost sm"
-                          disabled={occupe === c.id || !c.has_session}
-                          onClick={() => tester(c)}
-                          title="Vérifier que la session est toujours valide"
-                        >
-                          Tester
-                        </button>
-                        <button
-                          className="btn ghost sm"
-                          disabled={occupe === c.id}
-                          onClick={() => supprimer(c)}
-                        >
-                          Supprimer
-                        </button>
+                        {canAdmin && (
+                          <>
+                            <button
+                              className="btn sm"
+                              disabled={occupe === c.id || login !== null}
+                              onClick={() => connecter(c)}
+                            >
+                              {occupe === c.id ? <span className="spinner" /> : c.has_session ? 'Reconnecter' : 'Connecter'}
+                            </button>
+                            <button
+                              className="btn ghost sm"
+                              disabled={occupe === c.id || !c.has_session}
+                              onClick={() => tester(c)}
+                              title="Vérifier que la session est toujours valide"
+                            >
+                              Tester
+                            </button>
+                            <button
+                              className="btn ghost sm"
+                              disabled={occupe === c.id}
+                              onClick={() => supprimer(c)}
+                            >
+                              Supprimer
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

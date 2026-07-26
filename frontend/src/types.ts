@@ -32,6 +32,12 @@ export interface Run extends RunSummary {
   content_sha256: string | null
   page_title: string | null
   final_url: string | null
+  drive_status: 'local' | 'pending' | 'uploaded' | 'failed'
+  drive_attempts: number
+  drive_last_error: string | null
+  drive_uploaded_at: string | null
+  drive_next_retry_at: string | null
+  drive_file_link: string | null
   previous_run_id: number | null
   logs: RunLog[]
 }
@@ -88,6 +94,28 @@ export interface Health {
   scheduler_running: boolean
   jobs: number
   targets_enabled: number
+  queue_backend: 'inline' | 'redis'
+  redis_ok: boolean
+  worker_alive: boolean
+  queue_depth: number
+  database_backend: string
+  storage_backend: 'local' | 'google_drive'
+  drive_configured: boolean
+}
+
+export interface DriveCheck {
+  configured: boolean
+  writable: boolean
+  parent_name: string | null
+  shared_drive: boolean
+  detail: string
+}
+
+export interface DriveRetry {
+  run_id: number
+  drive_status: string
+  drive_file_link: string | null
+  detail: string
 }
 
 export interface Job {
@@ -105,9 +133,71 @@ export interface User {
   last_login_at: string | null
 }
 
+export type MembershipRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+export interface Organization {
+  id: number
+  name: string
+  slug: string
+  role: MembershipRole
+  created_at: string
+  quota_accounts: number
+  quota_targets: number
+  quota_daily_captures: number
+  quota_storage_bytes: number
+  retention_days: number
+}
+
+export interface QuotaMetric {
+  used: number
+  limit: number
+  remaining: number | null
+  percent: number | null
+  unlimited: boolean
+}
+
+export interface OrganizationUsage {
+  organization_id: number
+  billing_date: string
+  accounts: QuotaMetric
+  targets: QuotaMetric
+  daily_captures: QuotaMetric
+  storage_bytes: QuotaMetric
+  retention_days: number
+}
+
+export interface OrganizationMember {
+  membership_id: number
+  user_id: number
+  email: string
+  role: MembershipRole
+  created_at: string
+}
+
+export interface OrganizationInvitation {
+  id: number
+  email: string
+  role: MembershipRole
+  created_at: string
+  expires_at: string
+  accepted_at: string | null
+  revoked_at: string | null
+  delivery: 'sent' | 'logged' | null
+  invite_url: string | null
+}
+
+export interface InvitationPreview {
+  organization_name: string
+  email: string
+  role: MembershipRole
+  expires_at: string
+  user_exists: boolean
+}
+
 export type AccountStatus =
   | 'never'
   | 'connected'
+  | 'disconnected'
   | 'expired'
   | 'verification_required'
   | 'error'
@@ -122,6 +212,7 @@ export interface Account {
   last_error: string | null
   created_at: string
   has_session: boolean
+  session_expires_at: string | null
   target_count: number
 }
 

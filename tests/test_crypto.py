@@ -7,6 +7,7 @@ valeurs (storage_state legacy des cibles, Phase 1a).
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from app.services import crypto
 
@@ -52,3 +53,31 @@ def test_vault_profile_roundtrip(tmp_path, monkeypatch):
 
     crypto.delete_vault(slug)
     assert not crypto.profile_exists(slug)
+
+
+def test_generation_concurrente_publie_une_seule_cle(tmp_path, monkeypatch):
+    monkeypatch.setattr(crypto.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(crypto.settings, "session_encryption_key", "")
+    monkeypatch.setattr(crypto.settings, "environment", "development")
+    crypto._fernet = None
+    try:
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            keys = list(pool.map(lambda _: crypto._load_key(), range(24)))
+        assert len(set(keys)) == 1
+        assert (tmp_path / ".session_key").read_bytes().strip() == keys[0]
+    finally:
+        crypto._fernet = None
+
+
+def test_production_refuse_de_demarrer_sans_cle(tmp_path, monkeypatch):
+    monkeypatch.setattr(crypto.settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(crypto.settings, "session_encryption_key", "")
+    monkeypatch.setattr(crypto.settings, "environment", "production")
+    crypto._fernet = None
+    try:
+        import pytest
+
+        with pytest.raises(RuntimeError, match="obligatoire en production"):
+            crypto.ensure_encryption_ready()
+    finally:
+        crypto._fernet = None

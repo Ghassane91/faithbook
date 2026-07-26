@@ -6,9 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user
+from app.api.deps import (
+    current_organization,
+    current_user,
+    organization_admin,
+    organization_member,
+)
 from app.database import get_session
-from app.models import Run, RunStatus, Target, TriggerType, User
+from app.models import Account, Run, RunStatus, Target, TriggerType, User
 from app.services.metrics import LABELS as METRIC_LABELS
 from app.scheduler import next_run_for, schedule_target, unschedule_target
 from app.schemas import (
@@ -20,9 +25,10 @@ from app.schemas import (
     TargetUpdate,
     TriggerRunResponse,
 )
-from app.services import audit, crypto, session_state
+from app.services import audit, crypto, quotas, session_state, tenancy
 from app.services.runner import trigger_target
 from app.services.ssrf import UrlRejected, check_url
+from app.services.request_ip import client_ip
 
 router = APIRouter(prefix="/api/targets", tags=["Cibles"], dependencies=[Depends(current_user)])
 
@@ -45,9 +51,14 @@ def _to_out(session: Session, target: Target) -> TargetOut:
 @router.get("", response_model=list[TargetOut], summary="Lister les cibles")
 def list_targets(
     enabled: bool | None = Query(default=None, description="Filtrer par etat actif"),
+    context: tenancy.OrganizationContext = Depends(current_organization),
     session: Session = Depends(get_session),
 ):
-    stmt = select(Target).order_by(Target.id)
+    stmt = (
+        select(Target)
+        .where(Target.organization_id == context.organization.id)
+        .order_by(Target.id)
+    )
     if enabled is not None:
         stmt = stmt.where(Target.enabled.is_(enabled))
     return [_to_out(session, t) for t in session.scalars(stmt).all()]
@@ -60,6 +71,29 @@ def _check_target_url(url: str) -> None:
         raise HTTPException(status_code=422, detail=f"URL refusee : {exc}") from None
 
 
+def _owned_target(
+    session: Session, target_id: int, context: tenancy.OrganizationContext
+) -> Target:
+    target = session.get(Target, target_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Cible introuvable")
+    if target.organization_id != context.organization.id:
+        raise HTTPException(status_code=403, detail="Cible d'une autre organisation.")
+    return target
+
+
+def _check_account(
+    session: Session,
+    account_id: int | None,
+    context: tenancy.OrganizationContext,
+) -> None:
+    if account_id is None:
+        return
+    account = session.get(Account, account_id)
+    if account is None or account.organization_id != context.organization.id:
+        raise HTTPException(status_code=422, detail="Compte connecté inaccessible.")
+
+
 @router.post(
     "", response_model=TargetOut, status_code=status.HTTP_201_CREATED, summary="Creer une cible"
 )
@@ -67,26 +101,37 @@ def create_target(
     payload: TargetCreate,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_member),
     session: Session = Depends(get_session),
 ):
     _check_target_url(payload.url)
-    target = Target(**payload.model_dump())
+    _check_account(session, payload.account_id, context)
+    try:
+        quotas.enforce_target_creation(session, context.organization.id)
+    except quotas.QuotaExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    target = Target(
+        **payload.model_dump(),
+        organization_id=context.organization.id,
+    )
     session.add(target)
     session.commit()
     session.refresh(target)
     schedule_target(target)
     audit.record(
         session, "target.create", user=user, detail=f"cible #{target.id} {target.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return _to_out(session, target)
 
 
 @router.get("/{target_id}", response_model=TargetOut, summary="Detail d'une cible")
-def get_target(target_id: int, session: Session = Depends(get_session)):
-    target = session.get(Target, target_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+def get_target(
+    target_id: int,
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
+    target = _owned_target(session, target_id, context)
     return _to_out(session, target)
 
 
@@ -96,15 +141,16 @@ def update_target(
     payload: TargetUpdate,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_member),
     session: Session = Depends(get_session),
 ):
-    target = session.get(Target, target_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+    target = _owned_target(session, target_id, context)
 
     changes = payload.model_dump(exclude_unset=True)
     if "url" in changes:
         _check_target_url(changes["url"])
+    if "account_id" in changes:
+        _check_account(session, changes["account_id"], context)
     for field, value in changes.items():
         setattr(target, field, value)
 
@@ -118,7 +164,7 @@ def update_target(
     schedule_target(target)
     audit.record(
         session, "target.update", user=user, detail=f"cible #{target.id} {target.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return _to_out(session, target)
 
@@ -130,15 +176,14 @@ def delete_target(
     target_id: int,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
-    target = session.get(Target, target_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+    target = _owned_target(session, target_id, context)
     unschedule_target(target_id)
     audit.record(
         session, "target.delete", user=user, detail=f"cible #{target_id} {target.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     session.delete(target)
     session.commit()
@@ -155,8 +200,11 @@ async def run_now(
     force: bool = Query(
         default=False, description="Ignorer la deduplication et forcer une nouvelle capture"
     ),
+    context: tenancy.OrganizationContext = Depends(organization_member),
+    session: Session = Depends(get_session),
 ):
     """Declenche immediatement une capture, sans attendre l'horaire planifie."""
+    _owned_target(session, target_id, context)
     try:
         run_id, run_status, detail = await trigger_target(
             target_id, TriggerType.manual, force=force
@@ -178,6 +226,7 @@ def set_session(
     payload: SessionIn,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
     """Enregistre un `storage_state` Playwright produit par `scripts/login_session.py`.
@@ -186,14 +235,12 @@ def set_session(
     que vous avez effectuee vous-meme dans un navigateur. Chiffre au repos
     (Fernet), au meme titre que les sessions des comptes connectes.
     """
-    target = session.get(Target, target_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+    target = _owned_target(session, target_id, context)
     target.storage_state_json = crypto.encrypt_text(json.dumps(payload.storage_state))
     session.commit()
     audit.record(
         session, "target.session_set", user=user, detail=f"cible #{target_id} {target.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return _session_status(target)
 
@@ -203,10 +250,12 @@ def set_session(
     response_model=SessionStatusOut,
     summary="Etat de la session (sans exposer les cookies)",
 )
-def get_session_status(target_id: int, session: Session = Depends(get_session)):
-    target = session.get(Target, target_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+def get_session_status(
+    target_id: int,
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
+    target = _owned_target(session, target_id, context)
     return _session_status(target)
 
 
@@ -219,16 +268,15 @@ def delete_session(
     target_id: int,
     request: Request,
     user: User = Depends(current_user),
+    context: tenancy.OrganizationContext = Depends(organization_admin),
     session: Session = Depends(get_session),
 ):
-    target = session.get(Target, target_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+    target = _owned_target(session, target_id, context)
     target.storage_state_json = None
     session.commit()
     audit.record(
         session, "target.session_delete", user=user, detail=f"cible #{target_id} {target.name}",
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
 
 
@@ -254,10 +302,10 @@ def _session_status(target: Target) -> SessionStatusOut:
 def target_runs(
     target_id: int,
     limit: int = Query(default=50, ge=1, le=500),
+    context: tenancy.OrganizationContext = Depends(current_organization),
     session: Session = Depends(get_session),
 ):
-    if session.get(Target, target_id) is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+    _owned_target(session, target_id, context)
     runs = session.scalars(
         select(Run).where(Run.target_id == target_id).order_by(Run.id.desc()).limit(limit)
     ).all()
@@ -265,11 +313,14 @@ def target_runs(
 
 
 @router.get("/{target_id}/metrics", summary="Série temporelle des métriques (abonnés…)")
-def target_metrics(target_id: int, session: Session = Depends(get_session)):
+def target_metrics(
+    target_id: int,
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
     """Historique des métriques relevées : une entrée par capture réussie qui en
     contient (la dernière capture du jour prime). Prêt à tracer un graphique."""
-    if session.get(Target, target_id) is None:
-        raise HTTPException(status_code=404, detail="Cible introuvable")
+    _owned_target(session, target_id, context)
     runs = session.scalars(
         select(Run)
         .where(Run.target_id == target_id, Run.status == RunStatus.success, Run.metrics.is_not(None))

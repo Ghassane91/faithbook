@@ -10,6 +10,7 @@ totalement les tests de la base et des fichiers reels du conteneur
 from __future__ import annotations
 
 import os
+import socket
 import tempfile
 
 from cryptography.fernet import Fernet
@@ -84,3 +85,18 @@ def auth_client(client, user):
     resp = client.post("/api/auth/login", json={"email": email, "password": password})
     assert resp.status_code == 200, resp.text
     return client
+
+
+@pytest.fixture()
+def public_example_dns(monkeypatch):
+    """DNS deterministe : les tests ne dependent pas de l'acces Internet."""
+    original = socket.getaddrinfo
+
+    def resolve(host, port, *args, **kwargs):
+        if host == "example.com":
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port))
+            ]
+        return original(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)

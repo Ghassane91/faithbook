@@ -33,7 +33,7 @@ def main() -> int:
     parser.add_argument("--url", default="https://www.facebook.com/", help="Page de connexion")
     parser.add_argument("--out", default="secrets/session.json", help="Fichier de sortie")
     parser.add_argument("--push", type=int, default=None, help="ID de cible a mettre a jour")
-    parser.add_argument("--api", default="http://localhost:8000", help="URL du backend")
+    parser.add_argument("--api", default="http://localhost:3000", help="URL publique via nginx")
     parser.add_argument("--api-key", default=None, help="Valeur de l'en-tete X-API-Key")
     args = parser.parse_args()
 

@@ -1,0 +1,7 @@
+services:
+  backend:
+    # Option de diagnostic local uniquement. Le bind loopback empeche tout
+    # acces depuis une autre machine, mais contourne nginx : ne jamais utiliser
+    # ce fichier sur un VPS.
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"

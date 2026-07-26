@@ -4,7 +4,9 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -42,6 +44,7 @@ class TriggerType(str, enum.Enum):
 class AccountStatus(str, enum.Enum):
     never = "never"  # profil cree, jamais connecte
     connected = "connected"
+    disconnected = "disconnected"  # coffre/cookies absents ou déconnexion détectée
     expired = "expired"
     verification_required = "verification_required"  # 2FA / captcha / checkpoint
     error = "error"
@@ -50,6 +53,13 @@ class AccountStatus(str, enum.Enum):
 class CaptureMode(str, enum.Enum):
     desktop = "desktop"
     mobile = "mobile"
+
+
+class MembershipRole(str, enum.Enum):
+    owner = "owner"
+    admin = "admin"
+    member = "member"
+    viewer = "viewer"
 
 
 class User(Base):
@@ -69,6 +79,109 @@ class User(Base):
     sessions: Mapped[list[AuthSession]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
+    memberships: Mapped[list[OrganizationMembership]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class Organization(Base):
+    """Espace de travail qui possède les cibles et les comptes connectés."""
+
+    __tablename__ = "organizations"
+    __table_args__ = (
+        CheckConstraint("quota_accounts >= 0", name="ck_org_quota_accounts_nonnegative"),
+        CheckConstraint("quota_targets >= 0", name="ck_org_quota_targets_nonnegative"),
+        CheckConstraint(
+            "quota_daily_captures >= 0",
+            name="ck_org_quota_daily_captures_nonnegative",
+        ),
+        CheckConstraint(
+            "quota_storage_bytes >= 0",
+            name="ck_org_quota_storage_bytes_nonnegative",
+        ),
+        CheckConstraint("retention_days >= 0", name="ck_org_retention_days_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    # 0 signifie illimité. Les valeurs sont stockées par organisation afin
+    # qu'un futur plan commercial puisse les modifier sans changer le code.
+    quota_accounts: Mapped[int] = mapped_column(
+        Integer, default=10, server_default="10", nullable=False
+    )
+    quota_targets: Mapped[int] = mapped_column(
+        Integer, default=100, server_default="100", nullable=False
+    )
+    quota_daily_captures: Mapped[int] = mapped_column(
+        Integer, default=500, server_default="500", nullable=False
+    )
+    quota_storage_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=10_737_418_240, server_default="10737418240", nullable=False
+    )
+    retention_days: Mapped[int] = mapped_column(
+        Integer, default=90, server_default="90", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    memberships: Mapped[list[OrganizationMembership]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class OrganizationMembership(Base):
+    """Rôle d'un utilisateur dans une organisation."""
+
+    __tablename__ = "organization_memberships"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_org_membership"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    role: Mapped[MembershipRole] = mapped_column(
+        Enum(MembershipRole), default=MembershipRole.member, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    organization: Mapped[Organization] = relationship(back_populates="memberships")
+    user: Mapped[User] = relationship(back_populates="memberships")
+
+
+class OrganizationInvitation(Base):
+    """Invitation à rejoindre une organisation, stockée sans jeton en clair."""
+
+    __tablename__ = "organization_invitations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    role: Mapped[MembershipRole] = mapped_column(
+        Enum(MembershipRole), default=MembershipRole.member, nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
+    invited_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuthSession(Base):
@@ -125,6 +238,9 @@ class Account(Base):
     owner_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     platform: Mapped[str] = mapped_column(String(40), default="facebook", nullable=False)
     # Slug du profil navigateur isolé (coffre chiffré profiles/<slug>.tar.enc).
@@ -171,6 +287,9 @@ class Target(Base):
     __tablename__ = "targets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -261,12 +380,23 @@ class Run(Base):
     page_title: Mapped[str | None] = mapped_column(Text)
     final_url: Mapped[str | None] = mapped_column(Text)
 
-    # --- Integration Google Drive : EN SUSPEND (voir README §2) -----------
-    # Colonnes conservees pour ne rien perdre si l'option est reactivee.
-    # Elles ne sont pas exposees par l'API tant que Drive est en suspend.
+    # --- Intégration Google Drive -----------------------------------------
     drive_folder_id: Mapped[str | None] = mapped_column(String(120))
     drive_file_id: Mapped[str | None] = mapped_column(String(120))
     drive_file_link: Mapped[str | None] = mapped_column(Text)
+    # local | pending | uploaded | failed. La capture locale reste toujours la
+    # source de vérité jusqu'à confirmation de l'envoi Drive.
+    drive_status: Mapped[str] = mapped_column(
+        String(20), default="local", server_default="local", nullable=False, index=True
+    )
+    drive_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    drive_last_error: Mapped[str | None] = mapped_column(Text)
+    drive_uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    drive_next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
     error_message: Mapped[str | None] = mapped_column(Text)
     skipped_reason: Mapped[str | None] = mapped_column(Text)

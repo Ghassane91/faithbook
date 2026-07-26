@@ -7,15 +7,18 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_user
 from app.config import settings
 from app.database import get_session
-from app.models import User
+from app.models import Organization, User
 from app.schemas import (
     ForgotPasswordIn,
+    InvitationAcceptIn,
+    InvitationPreviewOut,
     LoginIn,
     PasswordChangeIn,
     ResetPasswordIn,
     UserOut,
 )
-from app.services import audit, auth, mailer
+from app.services import audit, auth, invitations, mailer
+from app.services.request_ip import client_ip
 
 router = APIRouter(prefix="/api/auth", tags=["Authentification"])
 
@@ -40,7 +43,7 @@ def login(
     session: Session = Depends(get_session),
 ):
     email = payload.email.strip().lower()
-    ip = request.client.host if request.client else "?"
+    ip = client_ip(request) or "?"
     cle = f"{ip}:{email}"
 
     if auth.trop_de_tentatives(cle):
@@ -73,7 +76,7 @@ def logout(request: Request, response: Response, session: Session = Depends(get_
     response.delete_cookie(auth.COOKIE_NAME, path="/")
     if user is not None:
         audit.record(
-            session, "auth.logout", user=user, ip=request.client.host if request.client else None
+            session, "auth.logout", user=user, ip=client_ip(request)
         )
 
 
@@ -115,12 +118,12 @@ def change_password(
     # deconnecter les appareils deja ouverts.
     auth.revoke_all_sessions(session, frais.id)
     token, _ = auth.create_session(
-        session, frais, request.headers.get("user-agent"), request.client.host if request.client else None
+        session, frais, request.headers.get("user-agent"), client_ip(request)
     )
     _pose_cookie(response, token)
     audit.record(
         session, "auth.password_change", user=frais,
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return UserOut.model_validate(frais)
 
@@ -137,7 +140,7 @@ def forgot_password(
     payload: ForgotPasswordIn, request: Request, session: Session = Depends(get_session)
 ):
     email = payload.email.strip().lower()
-    ip = request.client.host if request.client else "?"
+    ip = client_ip(request) or "?"
 
     # Limitation : empeche de sonder des adresses ou de spammer une boite.
     cle = f"forgot:{ip}"
@@ -185,6 +188,92 @@ def reset_password(
         )
     audit.record(
         session, "auth.password_reset", user=user,
-        ip=request.client.host if request.client else None,
+        ip=client_ip(request),
     )
     return {"detail": "Mot de passe réinitialisé. Vous pouvez maintenant vous connecter."}
+
+
+# --- Invitations d'organisation -----------------------------------------
+@router.get(
+    "/invitations/{token}",
+    response_model=InvitationPreviewOut,
+    summary="Vérifier une invitation",
+)
+def preview_invitation(token: str, session: Session = Depends(get_session)):
+    invitation = invitations.resolve(session, token)
+    if invitation is None:
+        raise HTTPException(status_code=404, detail="Invitation invalide ou expirée.")
+    organization = session.get(Organization, invitation.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Invitation invalide ou expirée.")
+    user_exists = (
+        session.scalars(select(User).where(User.email == invitation.email)).first()
+        is not None
+    )
+    return InvitationPreviewOut(
+        organization_name=organization.name,
+        email=invitation.email,
+        role=invitation.role,
+        expires_at=invitation.expires_at,
+        user_exists=user_exists,
+    )
+
+
+@router.post(
+    "/invitations/accept",
+    response_model=UserOut,
+    summary="Accepter une invitation",
+)
+def accept_invitation(
+    payload: InvitationAcceptIn,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+):
+    invitation = invitations.resolve(session, payload.token)
+    if invitation is None:
+        raise HTTPException(status_code=400, detail="Invitation invalide ou expirée.")
+
+    ip = client_ip(request) or "?"
+    attempt_key = f"invite:{ip}:{invitation.token_hash[:16]}"
+    if auth.trop_de_tentatives(attempt_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Trop de tentatives. Réessayez dans quelques minutes.",
+        )
+
+    user = session.scalars(
+        select(User).where(User.email == invitation.email)
+    ).first()
+    if user is not None:
+        if not user.is_active or not auth.verify_password(
+            payload.password, user.password_hash
+        ):
+            auth.noter_echec(attempt_key)
+            raise HTTPException(status_code=401, detail="Mot de passe incorrect.")
+    else:
+        problem = auth.password_problem(payload.password)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
+        user = User(
+            email=invitation.email,
+            password_hash=auth.hash_password(payload.password),
+            must_change_password=False,
+        )
+        session.add(user)
+        session.flush()
+
+    invitations.accept(session, invitation, user)
+    auth.reinitialiser_tentatives(attempt_key)
+    session_token, _ = auth.create_session(
+        session, user, request.headers.get("user-agent"), ip
+    )
+    _pose_cookie(response, session_token)
+    audit.record(
+        session,
+        "organization.invitation_accept",
+        user=user,
+        detail=f"organisation #{invitation.organization_id}",
+        ip=ip,
+    )
+    return UserOut.model_validate(user)

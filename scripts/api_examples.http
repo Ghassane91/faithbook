@@ -1,5 +1,5 @@
 ### Exemples d'appels API (extension REST Client / IntelliJ HTTP Client)
-@base = http://localhost:8000
+@base = http://localhost:3000
 # @apikey = votre-cle    # decommenter si API_KEY est definie dans .env
 
 ### Etat du service

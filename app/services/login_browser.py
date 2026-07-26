@@ -12,6 +12,8 @@ from playwright.async_api import BrowserContext, Playwright, async_playwright
 
 from app.config import settings
 from app.services import crypto
+from app.services.profile_lock import get_profile_lock
+from app.services.ssrf import playwright_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class LoginSession:
     # Jeton opaque exige par le proxy (nginx auth_request) pour atteindre
     # /novnc et /websockify ; regenere a chaque connexion, jamais journalise.
     token: str
+    profile_lock: asyncio.Lock | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     token_expires_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -83,23 +86,29 @@ class LoginManager:
                     "Une connexion manuelle est déjà en cours. Terminez-la avant d'en ouvrir une autre."
                 )
 
+            profile_lock = get_profile_lock(profile_slug)
+            await profile_lock.acquire()
             work_dir = crypto.open_profile(profile_slug)
-            pw = await async_playwright().start()
+            pw = None
             try:
+                pw = await async_playwright().start()
                 context = await pw.chromium.launch_persistent_context(
                     user_data_dir=str(work_dir),
                     headless=False,  # visible sur DISPLAY=:99 -> noVNC
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--start-maximized"],
                     viewport={"width": 1600, "height": 900},
                     locale="fr-FR",
+                    proxy=playwright_proxy(),
                 )
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(
                     LOGIN_URLS.get(platform, "about:blank"), wait_until="domcontentloaded"
                 )
             except Exception:
-                await pw.stop()
+                if pw is not None:
+                    await pw.stop()
                 crypto.discard_profile(work_dir)
+                profile_lock.release()
                 raise
 
             token = secrets.token_urlsafe(32)
@@ -112,6 +121,7 @@ class LoginManager:
                 context=context,
                 started_by_user_id=started_by_user_id,
                 token=token,
+                profile_lock=profile_lock,
             )
             logger.info("Connexion manuelle demarree pour le compte %s", account_id)
 
@@ -202,6 +212,8 @@ class LoginManager:
                 crypto.seal_profile(sess.profile_slug, sess.work_dir)
         finally:
             crypto.discard_profile(sess.work_dir)
+            if sess.profile_lock is not None and sess.profile_lock.locked():
+                sess.profile_lock.release()
         logger.info("Connexion manuelle terminee pour le compte %s (scelle=%s)", sess.account_id, seal)
 
 

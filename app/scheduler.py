@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,7 +11,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import session_scope
 from app.models import Run, RunStatus, Target, TriggerType
-from app.services import notify
+from app.services import drive_sync, notify, quotas
 from app.services.runner import trigger_target
 
 logger = logging.getLogger(__name__)
@@ -24,6 +22,7 @@ JOB_PREFIX = "target-"
 PURGE_JOB_ID = "purge-old-runs"
 SESSION_CHECK_JOB_ID = "session-check"
 DAILY_REPORT_JOB_ID = "daily-report"
+DRIVE_RETRY_JOB_ID = "drive-retry"
 
 
 def job_id_for(target_id: int) -> str:
@@ -83,41 +82,14 @@ def next_run_for(target_id: int) -> datetime | None:
 
 
 def _purge_old_runs() -> None:
-    if settings.run_retention_days <= 0:
-        return
-    cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(days=settings.run_retention_days)
     with session_scope() as session:
-        old = session.scalars(select(Run).where(Run.started_at < cutoff)).all()
-        for run in old:
-            session.delete(run)
-        if old:
-            logger.info("Purge : %s executions supprimees", len(old))
-    _purge_old_files()
-
-
-def _purge_old_files() -> None:
-    """Supprime les captures locales plus vieilles que la retention.
-
-    Uniquement le disque local : la copie deja synchronisee sur Google Drive
-    n'est pas touchee (robocopy est additif), elle sert d'archive longue duree.
-    """
-    root = Path(settings.screenshot_dir)
-    if settings.run_retention_days <= 0 or not root.is_dir():
-        return
-    cutoff_ts = time.time() - settings.run_retention_days * 86400
-    removed = 0
-    for f in root.rglob("*"):
-        if f.is_file() and f.stat().st_mtime < cutoff_ts:
-            f.unlink(missing_ok=True)
-            removed += 1
-    # Retire les dossiers de site devenus vides.
-    for d in sorted((p for p in root.rglob("*") if p.is_dir()), reverse=True):
-        try:
-            d.rmdir()  # ne supprime que si vide
-        except OSError:
-            pass
-    if removed:
-        logger.info("Purge fichiers : %s capture(s) locale(s) supprimee(s)", removed)
+        removed_runs, removed_files = quotas.purge_expired_runs(session)
+    if removed_runs or removed_files:
+        logger.info(
+            "Purge par organisation : %s exécution(s), %s fichier(s)",
+            removed_runs,
+            removed_files,
+        )
 
 
 async def _session_check_job() -> None:
@@ -132,6 +104,13 @@ def _daily_report_job() -> None:
         notify.daily_report()
     except Exception:
         logger.exception("Rapport quotidien en erreur")
+
+
+def _drive_retry_job() -> None:
+    try:
+        drive_sync.retry_due_uploads()
+    except Exception:
+        logger.exception("Reprise automatique Google Drive en erreur")
 
 
 def _cron_at(hhmm: str) -> CronTrigger | None:
@@ -185,6 +164,20 @@ def start_scheduler() -> None:
             replace_existing=True, misfire_grace_time=3600, coalesce=True,
         )
         logger.info("Rapport quotidien planifie a %s", settings.daily_report_time)
+    if settings.storage_backend == "google_drive":
+        scheduler.add_job(
+            _drive_retry_job,
+            trigger="interval",
+            minutes=max(1, settings.google_drive_retry_minutes),
+            id=DRIVE_RETRY_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info(
+            "Reprise Google Drive planifiée toutes les %s minute(s)",
+            max(1, settings.google_drive_retry_minutes),
+        )
     count = load_all_targets()
     logger.info("Planificateur demarre (%s cibles, fuseau %s)", count, settings.timezone)
 
@@ -196,6 +189,11 @@ def shutdown_scheduler() -> None:
 
 def mark_interrupted_runs() -> None:
     """Au demarrage, les executions restees 'running' viennent d'un arret brutal."""
+    if settings.queue_backend == "redis":
+        # Le worker possède une file fiable et réinsère les messages réservés
+        # après un redémarrage. Marquer ici les runs comme échoués créerait une
+        # course entre l'API et le worker.
+        return
     with session_scope() as session:
         stale = session.scalars(
             select(Run).where(Run.status.in_([RunStatus.running, RunStatus.pending]))

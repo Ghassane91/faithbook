@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import stat
 import tarfile
 import tempfile
@@ -31,15 +32,39 @@ def _load_key() -> bytes:
 
     key_file = Path(settings.data_dir) / ".session_key"
     if key_file.is_file():
-        return key_file.read_bytes().strip()
+        existing = key_file.read_bytes().strip()
+        if existing:
+            return existing
+
+    if settings.environment == "production":
+        raise RuntimeError(
+            "SESSION_ENCRYPTION_KEY est obligatoire en production. "
+            "Le service refuse de demarrer pour ne pas rendre les sessions illisibles."
+        )
 
     key = Fernet.generate_key()
     key_file.parent.mkdir(parents=True, exist_ok=True)
-    key_file.write_bytes(key)
+    # Ecriture complete dans un fichier prive, puis publication atomique par
+    # lien dur. Deux workers concurrents ne peuvent donc jamais publier deux
+    # cles differentes ni lire un fichier encore vide/partiel.
+    tmp = key_file.with_name(f".session_key.{os.getpid()}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
     try:
-        os.chmod(key_file, stat.S_IRUSR | stat.S_IWUSR)  # 600
-    except OSError:  # pragma: no cover - systemes sans chmod POSIX
-        pass
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(key)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(tmp, key_file)
+        except FileExistsError:
+            # Un autre worker a gagne la course ; sa cle complete est la source
+            # de verite commune.
+            key = key_file.read_bytes().strip()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+    if not key:
+        raise RuntimeError("La cle de session generee est vide.")
     logger.warning(
         "SESSION_ENCRYPTION_KEY absente : une cle a ete generee dans %s. "
         "Pour la production, copiez-la dans la variable d'environnement "
@@ -55,6 +80,11 @@ def _get() -> Fernet:
     if _fernet is None:
         _fernet = Fernet(_load_key())
     return _fernet
+
+
+def ensure_encryption_ready() -> None:
+    """Valide la cle au demarrage, notamment l'obligation en production."""
+    _get()
 
 
 # --- Chiffrement de courtes valeurs (cookies exportes, storage_state) -----
@@ -102,7 +132,9 @@ def open_profile(profile_slug: str) -> Path:
     if vault.is_file():
         blob = _get().decrypt(vault.read_bytes())
         with tarfile.open(fileobj=BytesIO(blob), mode="r:gz") as tar:
-            tar.extractall(work)  # noqa: S202 - archive produite par nous, contenu maitrise
+            # `data` refuse les chemins absolus, les sorties de dossier et les
+            # types de fichiers dangereux, meme si l'archive est deja chiffree.
+            tar.extractall(work, filter="data")
     return work
 
 

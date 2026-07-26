@@ -7,7 +7,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $AppUrl    = 'http://localhost:3000'
-$HealthUrl = 'http://localhost:8020/api/health'
+$HealthUrl = 'http://localhost:3000/api/health'
 
 # --- Dossier du projet : là où se trouve l'exe (ou le script en test) --------
 if ($PSScriptRoot) {

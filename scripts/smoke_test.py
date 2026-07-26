@@ -13,7 +13,7 @@ import time
 
 import httpx
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:3000"
 EMAIL = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("SMOKE_EMAIL", "admin@local")
 PASSWORD = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("SMOKE_PASSWORD", "")
 API_KEY = os.environ.get("API_KEY", "")

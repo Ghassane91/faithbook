@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
+from dataclasses import dataclass
 from urllib.parse import urlparse
+
+from playwright.async_api import BrowserContext, Request, Route
 
 from app.config import settings
 
@@ -74,3 +78,47 @@ def check_url(url: str) -> None:
             raise UrlRejected(
                 f"« {host} » pointe vers une adresse interne ({ip}) : accès refusé."
             )
+
+
+def playwright_proxy() -> dict[str, str] | None:
+    """Configuration proxy commune a tous les navigateurs Playwright."""
+    value = settings.browser_proxy_url.strip()
+    return {"server": value} if value else None
+
+
+@dataclass
+class BrowserRequestGuard:
+    """Revalide chaque requete, y compris redirections et sous-ressources.
+
+    Le proxy sortant configure dans Compose constitue la barriere reseau contre
+    le DNS rebinding ; ce garde ajoute une validation applicative explicite et
+    un message d'erreur exploitable dans les journaux.
+    """
+
+    blocked: UrlRejected | None = None
+    blocked_url: str | None = None
+
+    async def handle(self, route: Route, request: Request) -> None:
+        if self.blocked is not None:
+            await route.abort("blockedbyclient")
+            return
+        try:
+            await asyncio.to_thread(check_url, request.url)
+        except UrlRejected as exc:
+            self.blocked = exc
+            self.blocked_url = request.url
+            await route.abort("blockedbyclient")
+            return
+        await route.continue_()
+
+    def raise_if_blocked(self) -> None:
+        if self.blocked is not None:
+            raise UrlRejected(
+                f"Requete navigateur bloquee ({self.blocked_url}) : {self.blocked}"
+            ) from self.blocked
+
+
+async def install_browser_guard(context: BrowserContext) -> BrowserRequestGuard:
+    guard = BrowserRequestGuard()
+    await context.route("**/*", guard.handle)
+    return guard

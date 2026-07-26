@@ -1,12 +1,70 @@
 services:
+  egress-proxy:
+    build: ./proxy
+    container_name: faithbook-egress-proxy
+    restart: unless-stopped
+    expose:
+      - "3128"
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: faithbook-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    expose:
+      - "6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  db:
+    image: postgres:17-alpine
+    container_name: faithbook-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-faithbook}"
+      POSTGRES_USER: "${POSTGRES_USER:-faithbook}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-faithbook-local-change-me}"
+    expose:
+      - "5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-faithbook} -d ${POSTGRES_DB:-faithbook}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
   backend:
     build: .
+    image: facebook-backend
     container_name: faithbook-backend
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "${API_PORT:-8000}:8000"
+    depends_on:
+      egress-proxy:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    # Le backend n'est jamais publie sur l'hote : toutes les requetes passent
+    # par nginx, qui applique les controles /docs et noVNC.
+    expose:
+      - "8000"
+      - "6080"
+    environment:
+      # L'ancien .env ne contient pas encore cette variable : la valeur par
+      # defaut active tout de meme la barriere anti-DNS-rebinding.
+      BROWSER_PROXY_URL: "${BROWSER_PROXY_URL-http://egress-proxy:3128}"
+      QUEUE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: "${POSTGRES_DATABASE_URL:-postgresql+psycopg://faithbook:faithbook-local-change-me@db:5432/faithbook}"
     volumes:
       # Donnees internes : base SQLite, journaux.
       - ./data:/data
@@ -17,16 +75,59 @@ services:
     # Chromium a besoin de plus que les 64Mo /dev/shm par defaut ; et les profils
     # navigateur sont dechiffres dans /dev/shm (en RAM, jamais en clair sur disque).
     shm_size: "1gb"
-    # 6080 (noVNC) n'est PAS publie sur l'hote : il n'est accessible qu'a travers
-    # le proxy nginx du frontend, lui-meme protege par l'authentification.
-    expose:
-      - "6080"
+
+  worker:
+    image: facebook-backend
+    container_name: faithbook-worker
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "app.worker"]
+    command: []
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      egress-proxy:
+        condition: service_healthy
+    environment:
+      BROWSER_PROXY_URL: "${BROWSER_PROXY_URL-http://egress-proxy:3128}"
+      QUEUE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: "${POSTGRES_DATABASE_URL:-postgresql+psycopg://faithbook:faithbook-local-change-me@db:5432/faithbook}"
+    volumes:
+      - ./data:/data
+      - "${OUTPUT_DIR:-./data/screenshots}:/output"
+      - ./secrets:/secrets:ro
+    shm_size: "1gb"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from app.services.run_queue import worker_alive; raise SystemExit(0 if worker_alive() else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
 
   frontend:
     build: ./frontend
     container_name: faithbook-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
     ports:
       - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  redis-data:
+  postgres-data:
