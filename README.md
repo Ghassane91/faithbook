@@ -36,6 +36,7 @@ phase livre un commit propre, ses tests, et cette section a jour.
 | 3b | **Quotas et rétention par organisation** : limites comptes/cibles/captures/stockage, blocage avant Chromium, consommation API et purge isolée | ✅ Fait — v1.7.0 |
 | 3c | **Interface premium et captures longues** : identité noir/ivoire, responsive, boutons ergonomiques, aperçus pleine hauteur et assemblage des fils Facebook virtualisés | ✅ Fait — v1.8.3 |
 | 3c.1 | **Robustesse du proxy sortant** : Squid supprime le PID périmé (`/run/squid.pid`) avant chaque démarrage et devient PID 1 via `exec`, ce qui évite la boucle de crash-restart après un redémarrage brutal de Docker Desktop | ✅ Fait — v1.8.4 |
+| 3c.2 | **Robustesse du backend au redémarrage** : l'entrypoint supprime le verrou X11 périmé (`/tmp/.X99-lock`) et le socket résiduel avant de lancer Xvfb, ce qui évite la boucle de crash-restart du conteneur backend après un `docker compose restart` | ✅ Fait — v1.8.4 |
 | 3d | Stockage S3 et URLs signées | ⏳ À faire |
 | 4–8 | Comparaison avancée, analyse de contenu (IA optionnelle), alertes multi-canaux, gestion de cibles avancée et plans commerciaux | ⏳ À faire |
 

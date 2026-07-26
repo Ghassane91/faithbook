@@ -7,6 +7,12 @@ set -e
 export DISPLAY=:99
 
 # Écran virtuel : la résolution couvre le plus grand rendu de capture.
+# Un redemarrage du conteneur (docker restart) conserve le systeme de fichiers :
+# Xvfb retrouve alors /tmp/.X99-lock et refuse de demarrer (Server is already
+# active for display 99), ce qui faisait boucler le conteneur backend. On
+# nettoie les verrous residuels avant de lancer l ecran virtuel.
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+
 Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 
