@@ -99,7 +99,7 @@ export interface Health {
   worker_alive: boolean
   queue_depth: number
   database_backend: string
-  storage_backend: 'local' | 'google_drive'
+  storage_backend: 'local' | 'google_drive' | 's3'
   drive_configured: boolean
 }
 
@@ -242,4 +242,11 @@ export interface SessionStatus {
   expires_at: string | null
   expired: boolean
   detail: string
+}
+
+// Lien de lecture vers la capture distante. Sur S3 il est signe et expire :
+// expire_dans_secondes indique sa duree de validite (null sur Drive).
+export interface LienCapture {
+  url: string | null
+  expire_dans_secondes: number | null
 }

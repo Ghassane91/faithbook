@@ -2,6 +2,7 @@ import type {
   Account,
   DriveCheck,
   DriveRetry,
+  LienCapture,
   Health,
   Job,
   LoginStatus,
@@ -180,6 +181,7 @@ export const api = {
   run: (id: number) => request<Run>(`/runs/${id}`),
   retryDrive: (id: number) =>
     request<DriveRetry>(`/runs/${id}/drive/retry`, { method: 'POST' }),
+  lienCapture: (id: number) => request<LienCapture>(`/runs/${id}/lien`),
   screenshotUrl: (id: number) => `${BASE}/runs/${id}/screenshot`,
   thumbnailUrl: (id: number) => `${BASE}/runs/${id}/thumbnail`,
 }

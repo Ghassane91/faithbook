@@ -16,6 +16,7 @@ export function RunDetail({ runId, canAdmin, onClose }: Props) {
   const [compare, setCompare] = useState(false)
   const [driveBusy, setDriveBusy] = useState(false)
   const [driveMessage, setDriveMessage] = useState<string | null>(null)
+  const [lienBusy, setLienBusy] = useState(false)
 
   async function retryDrive() {
     setDriveBusy(true)
@@ -28,6 +29,25 @@ export function RunDetail({ runId, canAdmin, onClose }: Props) {
       setDriveMessage(err instanceof Error ? err.message : 'Envoi Drive impossible')
     } finally {
       setDriveBusy(false)
+    }
+  }
+
+  async function ouvrirCapture() {
+    // L onglet doit etre ouvert AVANT la requete : ouvert apres un await,
+    // il serait bloque comme fenetre surgissante par le navigateur.
+    const onglet = window.open('', '_blank')
+    setLienBusy(true)
+    setDriveMessage(null)
+    try {
+      const { url } = await api.lienCapture(runId)
+      if (!url) throw new Error('Lien indisponible pour cette execution.')
+      if (onglet) onglet.location.href = url
+      else window.location.href = url
+    } catch (err) {
+      onglet?.close()
+      setDriveMessage(err instanceof Error ? err.message : 'Lien indisponible')
+    } finally {
+      setLienBusy(false)
     }
   }
 
@@ -178,15 +198,14 @@ export function RunDetail({ runId, canAdmin, onClose }: Props) {
                 )}
                 {driveMessage && <div className="notice info">{driveMessage}</div>}
                 <div className="btn-row" style={{ marginTop: 10 }}>
-                  {run.drive_file_link && (
-                    <a
+                  {run.drive_status === 'uploaded' && (
+                    <button
                       className="btn sm"
-                      href={run.drive_file_link}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={ouvrirCapture}
+                      disabled={lienBusy}
                     >
-                      Ouvrir dans Drive
-                    </a>
+                      {lienBusy ? <span className="spinner" /> : 'Ouvrir le fichier distant'}
+                    </button>
                   )}
                   {canAdmin && run.drive_status !== 'uploaded' && (
                     <button className="btn ghost sm" onClick={retryDrive} disabled={driveBusy}>
