@@ -38,6 +38,7 @@ phase livre un commit propre, ses tests, et cette section a jour.
 | 3c.1 | **Robustesse du proxy sortant** : Squid supprime le PID périmé (`/run/squid.pid`) avant chaque démarrage et devient PID 1 via `exec`, ce qui évite la boucle de crash-restart après un redémarrage brutal de Docker Desktop | ✅ Fait — v1.8.4 |
 | 3c.2 | **Robustesse du backend au redémarrage** : l'entrypoint supprime le verrou X11 périmé (`/tmp/.X99-lock`) et le socket résiduel avant de lancer Xvfb, ce qui évite la boucle de crash-restart du conteneur backend après un `docker compose restart` | ✅ Fait — v1.8.4 |
 | 3d | Stockage S3 et URLs signées | ⏳ À faire |
+| 3d.1 | **Client S3 et routage du stockage** : client compatible S3 (AWS, Backblaze B2, Wasabi, MinIO), selection par STORAGE_BACKEND, envoi sans doublon et reprise automatique, 8 tests | ✅ Fait — v1.9.0 |
 | 4–8 | Comparaison avancée, analyse de contenu (IA optionnelle), alertes multi-canaux, gestion de cibles avancée et plans commerciaux | ⏳ À faire |
 
 Le développement continue **en local** ; le passage sur VPS (§13) n'aura lieu

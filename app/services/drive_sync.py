@@ -12,6 +12,7 @@ from app.database import session_scope
 from app.models import Run, RunLog, RunStatus, Target, utcnow
 from app.services.capture import organization_folder, site_label, slugify
 from app.services.drive import UploadResult, drive_client
+from app.services.s3 import s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,13 @@ def folder_names(target: Target, capture_date: str) -> tuple[str, ...]:
     return tuple(names)
 
 
+def _client():
+    """Client de stockage distant choisi par STORAGE_BACKEND."""
+    if settings.storage_backend == "s3":
+        return s3_client
+    return drive_client
+
+
 def upload_capture(
     path: Path,
     target: Target,
@@ -54,17 +62,18 @@ def upload_capture(
     filename: str | None = None,
 ) -> DrivePlacement:
     """Crée AAAA-MM-JJ/organisation/site[/sous-dossier], puis envoie le PNG."""
-    if not drive_client.is_configured():
+    client = _client()
+    if not client.is_configured():
         raise RuntimeError(
-            "Google Drive non configuré : fichier de compte de service ou "
-            "GOOGLE_DRIVE_PARENT_FOLDER_ID manquant."
+            "Stockage distant non configuré : fichier de compte de service ou "
+            "les reglages du fournisseur choisi (Drive ou S3) sont manquants."
         )
     names = folder_names(target, capture_date)
     parent_id: str | None = None
     for name in names:
-        parent_id = drive_client.ensure_folder(name, parent_id)
+        parent_id = client.ensure_folder(name, parent_id)
     assert parent_id is not None
-    upload = drive_client.upload(path, parent_id, filename or path.name)
+    upload = client.upload(path, parent_id, filename or path.name)
     return DrivePlacement(upload=upload, folders=names)
 
 
@@ -102,7 +111,7 @@ def _append_log(session, run: Run, level: str, message: str) -> None:
 
 def retry_due_uploads() -> DriveRetryStats:
     """Reprend un lot d'envois Drive sans refaire les captures."""
-    if settings.storage_backend != "google_drive" or not drive_client.is_configured():
+    if settings.storage_backend not in ("google_drive", "s3") or not _client().is_configured():
         return DriveRetryStats()
 
     now = utcnow()

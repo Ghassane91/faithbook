@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     timezone: str = "UTC"
 
     # Stockage
-    storage_backend: Literal["local", "google_drive"] = "local"
+    storage_backend: Literal["local", "google_drive", "s3"] = "local"
     data_dir: str = "/data"
     screenshot_dir: str = "/data/screenshots"
     database_url: str = "sqlite:////data/app.db"
@@ -104,6 +104,20 @@ class Settings(BaseSettings):
     # Les captures locales dont l'envoi a échoué sont reprises automatiquement.
     google_drive_retry_minutes: int = 5
     google_drive_retry_batch_size: int = 20
+
+    # -- Stockage compatible S3 (AWS S3, Backblaze B2, Wasabi, MinIO) -----
+    # Laisser s3_endpoint_url vide pour AWS ; le renseigner pour tout autre
+    # fournisseur compatible S3.
+    s3_bucket: str = ""
+    s3_region: str = ""
+    s3_endpoint_url: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    # Prefixe commun a toutes les cles, utile pour partager un bucket.
+    s3_prefix: str = ""
+    s3_api_retries: int = 3
+    # Duree de validite des URLs signees servies a l'interface.
+    s3_signed_url_ttl_seconds: int = 900
     # Format du nom des dossiers dates, en local comme sur Drive.
     folder_date_format: str = "%Y-%m-%d"
 
