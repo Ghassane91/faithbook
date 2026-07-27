@@ -16,6 +16,7 @@ from app.schemas import DriveRetryOut, RunListOut, RunLogOut, RunOut, RunSummary
 from app.services.capture import make_thumbnail, thumb_path
 from app.services import audit, drive_sync, tenancy
 from app.services.drive import drive_client
+from app.services.s3 import s3_client
 from app.services.request_ip import client_ip
 
 router = APIRouter(
@@ -227,3 +228,29 @@ async def retry_drive_upload(
         drive_file_link=run.drive_file_link,
         detail="Capture envoyée sur Google Drive.",
     )
+
+
+@router.get("/{run_id}/lien", summary="Lien vers la capture stockee a distance")
+def get_run_remote_link(
+    run_id: int,
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
+    """Renvoie un lien de lecture vers la capture distante.
+
+    Sur S3 le lien est signe et expire : il est donc regenere a chaque
+    appel a partir de la cle enregistree, jamais lu depuis la base. Sur
+    Drive le lien est permanent et rendu tel quel.
+    """
+    run = _owned_run(session, run_id, context)
+    if run.drive_status != "uploaded" or not run.drive_file_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Aucune capture distante pour cette execution.",
+        )
+    if settings.storage_backend == "s3":
+        return {
+            "url": s3_client.signed_url(run.drive_file_id),
+            "expire_dans_secondes": settings.s3_signed_url_ttl_seconds,
+        }
+    return {"url": run.drive_file_link, "expire_dans_secondes": None}

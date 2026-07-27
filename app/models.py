@@ -381,8 +381,10 @@ class Run(Base):
     final_url: Mapped[str | None] = mapped_column(Text)
 
     # --- Intégration Google Drive -----------------------------------------
-    drive_folder_id: Mapped[str | None] = mapped_column(String(120))
-    drive_file_id: Mapped[str | None] = mapped_column(String(120))
+    # Cle ou prefixe distant : un identifiant Drive fait 33 caracteres, mais
+    # une cle S3 peut aller jusqu a 1024. Type texte pour ne rien tronquer.
+    drive_folder_id: Mapped[str | None] = mapped_column(Text)
+    drive_file_id: Mapped[str | None] = mapped_column(Text)
     drive_file_link: Mapped[str | None] = mapped_column(Text)
     # local | pending | uploaded | failed. La capture locale reste toujours la
     # source de vérité jusqu'à confirmation de l'envoi Drive.
