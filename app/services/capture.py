@@ -29,6 +29,9 @@ class CaptureResult:
     page_title: str
     final_url: str
     metrics: dict | None = None  # abonnés / mentions J'aime repérés dans la page
+    # Texte visible de la page, conserve pour comparer les contenus entre
+    # deux captures : un fil reordonne ne doit pas compter comme un changement.
+    body_text: str | None = None
     # État rafraîchi après navigation, destiné à être rechiffré par le runner.
     storage_state: dict | None = None
     scroll_steps: int = 0
@@ -133,6 +136,44 @@ def image_change_ratio(before: Path, after: Path) -> float | None:
     except Exception:  # noqa: BLE001 - la comparaison est un confort, jamais bloquante
         logger.warning("Comparaison d'images impossible (%s vs %s)", before, after, exc_info=True)
         return None
+
+
+# En dessous de cette longueur, une ligne est du decor (boutons, compteurs,
+# separateurs) et non du contenu : on l ignore pour comparer deux pages.
+_TEXT_MIN_LEN = 8
+
+
+def _lignes_utiles(text: str) -> set[str]:
+    """Lignes de contenu d une page, normalisees pour la comparaison."""
+    lignes: set[str] = set()
+    for brute in text.splitlines():
+        ligne = " ".join(brute.split())
+        if len(ligne) >= _TEXT_MIN_LEN:
+            lignes.add(ligne.casefold())
+    return lignes
+
+
+def text_change_ratio(before: str | None, after: str | None) -> float | None:
+    """Proportion (0..1) de lignes de texte apparues ou disparues.
+
+    Insensible a l ordre : un fil de publications reordonne, sans contenu
+    nouveau, donne 0. C est la difference decisive avec la comparaison
+    pixel, qui compare des positions absolues et voit un changement massif
+    des que les publications changent de place.
+
+    Retourne None si l une des captures n a pas de texte exploitable ;
+    l appelant retombe alors sur la comparaison d images.
+    """
+    if not before or not after:
+        return None
+    avant = _lignes_utiles(before)
+    apres = _lignes_utiles(after)
+    if not avant or not apres:
+        return None
+    union = avant | apres
+    if not union:
+        return 0.0
+    return round(len(avant ^ apres) / len(union), 4)
 
 
 def make_thumbnail(screenshot: Path) -> Path | None:
@@ -610,6 +651,7 @@ async def _capture_page_impl(
             guard.raise_if_blocked()
             # Métriques (abonnés, mentions J'aime…) depuis le texte de la page,
             # best-effort : un échec ici ne compromet jamais la capture.
+            body_text = None
             try:
                 body_text = await page.inner_text("body")
                 metrics = parse_page_metrics(body_text) or None
@@ -649,6 +691,7 @@ async def _capture_page_impl(
         page_title=title,
         final_url=final_url,
         metrics=metrics,
+        body_text=body_text,
         storage_state=refreshed_storage,
         scroll_steps=scroll_steps,
         document_height=document_height,

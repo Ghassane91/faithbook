@@ -24,6 +24,7 @@ from app.services.capture import (
     organization_folder,
     site_label,
     slugify,
+    text_change_ratio,
     thumb_path,
 )
 from app.services.notify import notify_change, notify_failure, notify_session_suspended
@@ -362,6 +363,7 @@ async def _attempt_once(
     run.screenshot_bytes = result.size_bytes
     run.content_sha256 = result.sha256
     run.page_title = result.page_title
+    run.body_text = result.body_text
     run.final_url = result.final_url
 
     if account is not None and result.storage_state is not None:
@@ -409,10 +411,16 @@ async def _attempt_once(
         )
         .order_by(Run.id.desc())
     ).first()
-    if prev and prev.screenshot_path and Path(prev.screenshot_path).exists():
-        ratio = await asyncio.to_thread(
-            image_change_ratio, Path(prev.screenshot_path), destination
-        )
+    if prev is not None:
+        # La comparaison de texte prime : elle ignore la position des elements,
+        # donc un fil reordonne sans contenu nouveau ne compte pas comme un
+        # changement. Repli sur les pixels si le texte manque (anciens runs,
+        # page sans texte exploitable).
+        ratio = text_change_ratio(prev.body_text, result.body_text)
+        if ratio is None and prev.screenshot_path and Path(prev.screenshot_path).exists():
+            ratio = await asyncio.to_thread(
+                image_change_ratio, Path(prev.screenshot_path), destination
+            )
         if ratio is not None:
             run.change_ratio = ratio
             run.changed = ratio >= settings.change_threshold

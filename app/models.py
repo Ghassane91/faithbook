@@ -378,6 +378,9 @@ class Run(Base):
     screenshot_bytes: Mapped[int | None] = mapped_column(Integer)
     content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     page_title: Mapped[str | None] = mapped_column(Text)
+    # Texte visible de la page : sert a comparer les contenus entre deux
+    # captures sans dependre de la position des elements a l ecran.
+    body_text: Mapped[str | None] = mapped_column(Text)
     final_url: Mapped[str | None] = mapped_column(Text)
 
     # --- Intégration Google Drive -----------------------------------------
