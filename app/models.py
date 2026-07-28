@@ -381,6 +381,8 @@ class Run(Base):
     # Texte visible de la page : sert a comparer les contenus entre deux
     # captures sans dependre de la position des elements a l ecran.
     body_text: Mapped[str | None] = mapped_column(Text)
+    # Synthese lisible produite par l IA quand la page a change.
+    ai_summary: Mapped[str | None] = mapped_column(Text)
     final_url: Mapped[str | None] = mapped_column(Text)
 
     # --- Intégration Google Drive -----------------------------------------

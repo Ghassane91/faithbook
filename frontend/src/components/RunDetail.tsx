@@ -137,6 +137,12 @@ export function RunDetail({ runId, canAdmin, onClose }: Props) {
                     </dd>
                   </>
                 )}
+                {run.ai_summary && (
+                  <>
+                    <dt>résumé IA</dt>
+                    <dd>{run.ai_summary}</dd>
+                  </>
+                )}
                 {run.final_url && (
                   <>
                     <dt>url finale</dt>

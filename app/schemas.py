@@ -369,6 +369,7 @@ class RunOut(RunSummary):
     screenshot_bytes: int | None
     content_sha256: str | None
     page_title: str | None
+    ai_summary: str | None = None
     final_url: str | None
     drive_status: str = "local"
     drive_attempts: int = 0

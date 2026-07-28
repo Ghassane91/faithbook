@@ -31,6 +31,7 @@ export interface Run extends RunSummary {
   screenshot_bytes: number | null
   content_sha256: string | null
   page_title: string | null
+  ai_summary: string | null
   final_url: string | null
   drive_status: 'local' | 'pending' | 'uploaded' | 'failed'
   drive_attempts: number

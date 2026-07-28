@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import session_scope
 from app.models import Account, AccountStatus, Run, RunLog, RunStatus, Target, TriggerType, utcnow
 from app.services import crypto, drive_sync, quotas, run_queue
+from app.services import ai_summary
 from app.services.capture import (
     SessionExpired,
     build_filename,
@@ -24,6 +25,7 @@ from app.services.capture import (
     organization_folder,
     site_label,
     slugify,
+    diff_lignes,
     text_change_ratio,
     thumb_path,
 )
@@ -271,6 +273,22 @@ async def execute_run(run_id: int, force: bool = False) -> None:
             notify_failure(target, run)
 
 
+async def _resume_ia(prev: Run, result) -> str | None:
+    """Synthese IA du contenu apparu depuis la capture precedente.
+
+    Desactivee par defaut : sans cle API on renvoie None sans rien tenter,
+    et une panne du service ne fait jamais echouer la capture.
+    """
+    if not ai_summary.is_configured():
+        return None
+    ajoutees, retirees = diff_lignes(prev.body_text, result.body_text)
+    if not ajoutees and not retirees:
+        return None
+    return await asyncio.to_thread(
+        ai_summary.resumer_changements, ajoutees, retirees, result.page_title
+    )
+
+
 def _elapsed_ms(run: Run) -> int:
     end = run.finished_at or utcnow()
     start = run.started_at
@@ -430,6 +448,10 @@ async def _attempt_once(
                 log_step(session, run, "diff",
                          f"Page modifiée : {pct} % de changement depuis la capture précédente",
                          attempt=attempt)
+                run.ai_summary = await _resume_ia(prev, result)
+                if run.ai_summary:
+                    session.commit()
+                    log_step(session, run, "ia", run.ai_summary, attempt=attempt)
                 if settings.notify_on_change:
                     notify_change(target, run, prev)
             else:

@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     s3_api_retries: int = 3
     # Duree de validite des URLs signees servies a l'interface.
     s3_signed_url_ttl_seconds: int = 900
+
+    # --- Synthese IA des changements (optionnelle, desactivee par defaut) ---
+    anthropic_api_key: str = ""
+    ai_summary_enabled: bool = False
+    ai_summary_model: str = "claude-opus-5"
+    ai_summary_retries: int = 2
     # Format du nom des dossiers dates, en local comme sur Drive.
     folder_date_format: str = "%Y-%m-%d"
 

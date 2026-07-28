@@ -176,6 +176,31 @@ def text_change_ratio(before: str | None, after: str | None) -> float | None:
     return round(len(avant ^ apres) / len(union), 4)
 
 
+def _lignes_indexees(text: str) -> dict[str, str]:
+    """Lignes utiles indexees par forme normalisee -> texte d origine."""
+    index: dict[str, str] = {}
+    for brute in text.splitlines():
+        ligne = " ".join(brute.split())
+        if len(ligne) >= _TEXT_MIN_LEN:
+            index.setdefault(ligne.casefold(), ligne)
+    return index
+
+
+def diff_lignes(
+    before: str | None, after: str | None
+) -> tuple[list[str], list[str]]:
+    """Lignes apparues puis lignes disparues entre deux captures.
+
+    On garde le texte d origine et son ordre : la synthese IA doit
+    recevoir des phrases lisibles, pas des cles normalisees.
+    """
+    avant = _lignes_indexees(before or "")
+    apres = _lignes_indexees(after or "")
+    ajoutees = [texte for cle, texte in apres.items() if cle not in avant]
+    retirees = [texte for cle, texte in avant.items() if cle not in apres]
+    return ajoutees, retirees
+
+
 def make_thumbnail(screenshot: Path) -> Path | None:
     """Genere une vignette JPEG a cote de la capture.
 
