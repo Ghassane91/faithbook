@@ -124,6 +124,12 @@ class Settings(BaseSettings):
     ai_summary_enabled: bool = False
     ai_summary_model: str = "claude-opus-5"
     ai_summary_retries: int = 2
+
+    # --- Canaux d alerte complementaires (vides = inactifs) ---
+    notify_telegram_bot_token: str = ""
+    notify_telegram_chat_id: str = ""
+    notify_webhook_url: str = ""
+    notify_channel_timeout_seconds: int = 10
     # Format du nom des dossiers dates, en local comme sur Drive.
     folder_date_format: str = "%Y-%m-%d"
 

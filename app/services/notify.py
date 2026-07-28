@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import session_scope
 from app.models import Account, AccountStatus, Run, RunStatus, Target, User, utcnow
-from app.services import mailer, session_check, session_state
+from app.services import channels, mailer, session_check, session_state
 from app.services.login_browser import login_manager
 
 logger = logging.getLogger(__name__)
@@ -43,15 +43,21 @@ def _recipient() -> str | None:
 
 
 def _send(subject: str, body: str) -> None:
-    """Envoi best-effort : une alerte ne doit jamais casser une capture."""
+    """Envoi best-effort sur tous les canaux.
+
+    Une alerte ne doit jamais casser une capture, et un canal en panne
+    ne doit pas empecher les autres de partir : le mail et les canaux
+    complementaires sont donc traites separement.
+    """
     try:
         to = _recipient()
-        if not to:
+        if to:
+            mailer.send_email(to, subject, body)
+        else:
             logger.warning("Aucun destinataire de notification configure.")
-            return
-        mailer.send_email(to, subject, body)
     except Exception:  # noqa: BLE001
-        logger.error("Envoi de notification impossible", exc_info=True)
+        logger.error("Envoi du mail de notification impossible", exc_info=True)
+    channels.broadcast(subject, body)
 
 
 # --- 1. Alerte immediate sur echec de capture ------------------------------
@@ -74,6 +80,7 @@ def notify_failure(target: Target, run: Run) -> None:
 # --- 1bis. Alerte quand une page suivie a changé ---------------------------
 def notify_change(target: Target, run: Run, prev: Run) -> None:
     pct = round((run.change_ratio or 0) * 100, 1)
+    resume = f"Résumé : {run.ai_summary}\n\n" if run.ai_summary else ""
     lien = f"{settings.public_url.rstrip('/')}/#/historique"
     body = (
         f"La page suivie a changé depuis la dernière capture.\n\n"
@@ -81,6 +88,7 @@ def notify_change(target: Target, run: Run, prev: Run) -> None:
         f"Adresse    : {target.url}\n"
         f"Changement : {pct} % de la page\n"
         f"Date       : {run.capture_date}\n\n"
+        f"{resume}"
         f"Comparez les captures (avant / après) dans l'historique :\n{lien}\n\n"
         f"— FaithBook"
     )
