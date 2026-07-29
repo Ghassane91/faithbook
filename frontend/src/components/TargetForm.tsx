@@ -30,6 +30,7 @@ const CHAMPS_ENVOYES = [
   'wait_after_load_ms', 'timeout_ms', 'user_agent', 'locale',
   'hide_selectors', 'dismiss_selectors', 'session_profile', 'account_id',
   'expected_selector', 'fail_if_url_contains', 'subfolder',
+  'tags',
 ] as const
 
 function chargeUtile(form: TargetInput): TargetInput {
@@ -324,6 +325,16 @@ export function TargetForm({ cible, canDelete, onClose, onSaved }: Props) {
                   value={form.subfolder ?? ''}
                   onChange={(e) => set({ subfolder: e.target.value || null })}
                   placeholder="pages"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="tags">Étiquettes</label>
+                <input
+                  id="tags"
+                  type="text"
+                  value={form.tags ?? ''}
+                  onChange={(e) => set({ tags: e.target.value || null })}
+                  placeholder="client-a, diocese"
                 />
               </div>
               <div className="field">

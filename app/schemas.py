@@ -243,6 +243,7 @@ class TargetBase(BaseModel):
         description='Fragments d\'URL interdits, separes par ";" (ex. "login;checkpoint")',
     )
     subfolder: str | None = Field(default=None, max_length=200)
+    tags: str | None = None
 
     _v_url = field_validator("url")(_validate_url)
     _v_time = field_validator("run_time")(_validate_time)
@@ -287,6 +288,7 @@ class TargetUpdate(BaseModel):
     expected_selector: str | None = None
     fail_if_url_contains: str | None = None
     subfolder: str | None = Field(default=None, max_length=200)
+    tags: str | None = None
 
     _v_url = field_validator("url")(_validate_url)
     _v_time = field_validator("run_time")(_validate_time)

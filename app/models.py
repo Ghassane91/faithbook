@@ -338,6 +338,10 @@ class Target(Base):
     # Sous-dossier optionnel a l'interieur du dossier du jour
     subfolder: Mapped[str | None] = mapped_column(String(200))
 
+    # Etiquettes libres separees par des virgules : regrouper les cibles
+    # par client ou par theme sans imposer une arborescence rigide.
+    tags: Mapped[str | None] = mapped_column(Text)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

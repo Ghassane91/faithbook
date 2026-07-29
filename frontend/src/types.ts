@@ -66,6 +66,7 @@ export interface Target {
   expected_selector: string | null
   fail_if_url_contains: string | null
   subfolder: string | null
+  tags: string | null
   created_at: string
   updated_at: string
   next_run_at: string | null

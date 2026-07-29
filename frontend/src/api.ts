@@ -145,13 +145,18 @@ export const api = {
       body: JSON.stringify({ token, password }),
     }),
 
-  targets: () => request<Target[]>('/targets'),
+  targets: (etiquette?: string) =>
+    request<Target[]>(
+      etiquette ? `/targets?etiquette=${encodeURIComponent(etiquette)}` : '/targets',
+    ),
   target: (id: number) => request<Target>(`/targets/${id}`),
   createTarget: (data: TargetInput) =>
     request<Target>('/targets', { method: 'POST', body: JSON.stringify(data) }),
   updateTarget: (id: number, data: TargetInput) =>
     request<Target>(`/targets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTarget: (id: number) => request<void>(`/targets/${id}`, { method: 'DELETE' }),
+  dupliquerCible: (id: number) =>
+    request<Target>(`/targets/${id}/dupliquer`, { method: 'POST' }),
   runNow: (id: number, force = false) =>
     request<{ run_id: number; status: string; detail: string }>(
       `/targets/${id}/run${force ? '?force=true' : ''}`,
