@@ -48,9 +48,17 @@ def _to_out(session: Session, target: Target) -> TargetOut:
     return out
 
 
+def etiquettes_de(brut: str | None) -> set[str]:
+    """Etiquettes normalisees d une cible, pour comparer sans surprise."""
+    if not brut:
+        return set()
+    return {p.strip().casefold() for p in brut.split(",") if p.strip()}
+
+
 @router.get("", response_model=list[TargetOut], summary="Lister les cibles")
 def list_targets(
     enabled: bool | None = Query(default=None, description="Filtrer par etat actif"),
+    etiquette: str | None = Query(default=None, description="Filtrer par etiquette"),
     context: tenancy.OrganizationContext = Depends(current_organization),
     session: Session = Depends(get_session),
 ):
@@ -61,7 +69,11 @@ def list_targets(
     )
     if enabled is not None:
         stmt = stmt.where(Target.enabled.is_(enabled))
-    return [_to_out(session, t) for t in session.scalars(stmt).all()]
+    cibles = session.scalars(stmt).all()
+    if etiquette:
+        voulue = etiquette.strip().casefold()
+        cibles = [c for c in cibles if voulue in etiquettes_de(c.tags)]
+    return [_to_out(session, c) for c in cibles]
 
 
 def _check_target_url(url: str) -> None:
@@ -341,3 +353,44 @@ def target_metrics(
 
     points = [par_jour[d] for d in sorted(par_jour)]
     return {"keys": sorted(cles), "points": points, "labels": METRIC_LABELS}
+
+
+# Champs qu une copie ne doit pas heriter : identite, horodatage, et les
+# cookies enregistres, qui se rattachent a une cible precise.
+_CHAMPS_NON_DUPLIQUES = {"id", "created_at", "updated_at", "storage_state_json"}
+
+
+@router.post(
+    "/{target_id}/dupliquer",
+    response_model=TargetOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Dupliquer une cible avec tous ses reglages",
+)
+def duplicate_target(
+    target_id: int,
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
+    """Recopie toutes les colonnes, y compris celles ajoutees plus tard :
+    ce sont les exclusions qui sont listees, pas les champs a copier.
+
+    La copie arrive desactivee, pour etre relue avant sa premiere capture.
+    """
+    source = _owned_target(session, target_id, context)
+    # Dupliquer cree bien une cible de plus : le quota doit compter
+    # cette voie comme la creation directe, sinon un simple clic le contourne.
+    try:
+        quotas.enforce_target_creation(session, context.organization.id)
+    except quotas.QuotaExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    copie = Target()
+    for colonne in Target.__table__.columns.keys():
+        if colonne in _CHAMPS_NON_DUPLIQUES:
+            continue
+        setattr(copie, colonne, getattr(source, colonne))
+    copie.name = ("Copie de " + source.name)[:200]
+    copie.enabled = False
+    session.add(copie)
+    session.commit()
+    session.refresh(copie)
+    return _to_out(session, copie)

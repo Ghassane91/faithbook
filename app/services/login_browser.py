@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import subprocess
 import json
 import logging
 import secrets
@@ -51,6 +53,32 @@ class LoginBusy(RuntimeError):
     """Une connexion manuelle est deja en cours (un seul ecran partage)."""
 
 
+def _tuer_chromium_residuel(work_dir) -> None:
+    """Dernier recours : Chromium survit parfois a une fermeture abandonnee.
+
+    On ne vise que les processus dont le dossier de profil est celui de
+    cette session. Les navigateurs de capture, qui utilisent d autres
+    dossiers, ne sont jamais touches.
+    """
+    try:
+        subprocess.run(["pkill", "-f", str(work_dir)], timeout=5, check=False)
+    except Exception:  # noqa: BLE001
+        logger.debug("Nettoyage des processus residuels impossible", exc_info=True)
+
+
+def _tuer_chromium_residuel(work_dir) -> None:
+    """Dernier recours : Chromium survit parfois a une fermeture abandonnee.
+
+    On ne vise que les processus dont le dossier de profil est celui de
+    cette session. Les navigateurs de capture, qui utilisent d autres
+    dossiers, ne sont jamais touches.
+    """
+    try:
+        subprocess.run(["pkill", "-f", str(work_dir)], timeout=5, check=False)
+    except Exception:  # noqa: BLE001
+        logger.debug("Nettoyage des processus residuels impossible", exc_info=True)
+
+
 class LoginManager:
     """Pilote UN navigateur de connexion visible a la fois (ecran :99 unique).
 
@@ -87,7 +115,20 @@ class LoginManager:
                 )
 
             profile_lock = get_profile_lock(profile_slug)
-            await profile_lock.acquire()
+            # Sans borne de temps, un verrou laisse pris par une session mal
+            # fermee fait attendre cet appel indefiniment : nginx coupe a 120 s
+            # et l utilisateur ne voit qu une erreur 504, sans explication.
+            try:
+                await asyncio.wait_for(
+                    profile_lock.acquire(),
+                    timeout=settings.login_lock_wait_seconds,
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                raise LoginBusy(
+                    "Le profil de ce compte est encore occup\u00e9 par une connexion "
+                    "pr\u00e9c\u00e9dente qui ne s\u2019est pas refermee. Patientez un "
+                    "instant puis r\u00e9essayez."
+                ) from None
             work_dir = crypto.open_profile(profile_slug)
             pw = None
             try:
@@ -192,6 +233,19 @@ class LoginManager:
             return
         await self._teardown(seal=False)
 
+    @staticmethod
+    async def _fermer_sans_se_figer(coro, limite: float, quoi: str) -> None:
+        """Attend une fermeture sans jamais s y bloquer.
+
+        Un navigateur qui ne repond plus ne leve pas d erreur : il ne rend
+        simplement jamais la main. Ce cas, qu un try/except ne rattrape pas,
+        laissait le verrou de profil pris jusqu au redemarrage suivant.
+        """
+        try:
+            await asyncio.wait_for(coro, timeout=limite)
+        except Exception:  # noqa: BLE001
+            logger.warning("%s : abandon apres %s s", quoi, limite, exc_info=True)
+
     async def _teardown(self, seal: bool) -> None:
         sess = self._active
         if sess is None:
@@ -199,22 +253,27 @@ class LoginManager:
         self._active = None
         if self._timeout_task and not self._timeout_task.done():
             self._timeout_task.cancel()
+        limite = settings.login_close_timeout_seconds
         try:
-            await sess.context.close()
-        except Exception:  # noqa: BLE001
-            logger.warning("Fermeture du contexte de login en erreur", exc_info=True)
-        try:
-            await sess.pw.stop()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
+            await self._fermer_sans_se_figer(
+                sess.context.close(), limite, "Fermeture du navigateur de connexion"
+            )
+            await self._fermer_sans_se_figer(sess.pw.stop(), limite, "Arret de Playwright")
             if seal:
                 crypto.seal_profile(sess.profile_slug, sess.work_dir)
+        except Exception:  # noqa: BLE001
+            logger.warning("Fin de connexion manuelle en erreur", exc_info=True)
         finally:
+            # Ces trois nettoyages doivent avoir lieu quoi qu il arrive au-dessus.
+            _tuer_chromium_residuel(sess.work_dir)
             crypto.discard_profile(sess.work_dir)
             if sess.profile_lock is not None and sess.profile_lock.locked():
                 sess.profile_lock.release()
-        logger.info("Connexion manuelle terminee pour le compte %s (scelle=%s)", sess.account_id, seal)
+        logger.info(
+            "Connexion manuelle terminee pour le compte %s (scelle=%s)",
+            sess.account_id,
+            seal,
+        )
 
 
 login_manager = LoginManager()

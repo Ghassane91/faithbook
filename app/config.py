@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     vnc_password: str = ""
     novnc_port: int = 6080
     login_timeout_minutes: int = 15
+    # Bornes anti-blocage du navigateur de connexion manuelle : sans elles,
+    # une fermeture qui se fige laisse le verrou de profil pris pour toujours.
+    login_lock_wait_seconds: int = 5
+    login_close_timeout_seconds: int = 10
     # Duree de vie du jeton qui autorise l'acces a /novnc et /websockify (courte
     # et independante de login_timeout_minutes : la fenetre d'exposition doit
     # rester minimale meme si la connexion manuelle elle-meme dure plus longtemps).
