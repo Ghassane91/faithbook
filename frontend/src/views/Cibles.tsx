@@ -12,7 +12,12 @@ interface Props {
 }
 
 export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
-  const { data: cibles, erreur, chargement, recharger } = useData(() => api.targets(), [], 20000)
+  const [filtre, setFiltre] = useState<string | null>(null)
+  const { data: cibles, erreur, chargement, recharger } = useData(
+    () => api.targets(filtre ?? undefined),
+    [filtre],
+    20000,
+  )
   const [edition, setEdition] = useState<Target | null | undefined>(undefined)
   const [stats, setStats] = useState<Target | null>(null)
   const [message, setMessage] = useState<{ texte: string; type: 'info' | 'error' } | null>(null)
@@ -35,6 +40,21 @@ export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
       setMessage({ texte: e instanceof Error ? e.message : 'Lancement impossible', type: 'error' })
     } finally {
       setOccupe(null)
+    }
+  }
+
+  async function dupliquer(cible: Target) {
+    try {
+      const copie = await api.dupliquerCible(cible.id)
+      setMessage({
+        texte:
+          copie.name +
+          " : copie cr\u00e9\u00e9e, en pause. Changez son adresse avant de l\u2019activer.",
+        type: 'info',
+      })
+      recharger()
+    } catch (e) {
+      setMessage({ texte: e instanceof Error ? e.message : 'Duplication impossible', type: 'error' })
     }
   }
 
@@ -67,7 +87,31 @@ export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
       {erreur && <div className="notice error">{erreur}</div>}
       {chargement && <p className="mono">Chargement…</p>}
 
-      {cibles && cibles.length === 0 && (
+      {filtre && (
+        <div className="notice info">
+          {"Filtre actif : \u00e9tiquette \u00ab "}
+          {filtre}
+          {" \u00bb. "}
+          <button className="btn ghost sm" onClick={() => setFiltre(null)}>
+            Tout afficher
+          </button>
+        </div>
+      )}
+
+      {cibles && cibles.length === 0 && filtre && (
+        <div className="empty">
+          <h3>
+            {"Aucune cible avec l\u2019\u00e9tiquette \u00ab "}
+            {filtre}
+            {" \u00bb"}
+          </h3>
+          <button className="btn" onClick={() => setFiltre(null)}>
+            Tout afficher
+          </button>
+        </div>
+      )}
+
+      {cibles && cibles.length === 0 && !filtre && (
         <div className="empty">
           <h3>Aucune cible enregistrée</h3>
           <p>
@@ -101,6 +145,25 @@ export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
                   <td>
                     <div className="cell-title">{c.name}</div>
                     <div className="cell-url">{c.url}</div>
+                    {c.tags && (
+                      <div className="btn-row" style={{ marginTop: 4 }}>
+                        {c.tags
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean)
+                          .map((t) => (
+                            <button
+                              key={t}
+                              className="tag"
+                              style={{ cursor: "pointer", border: 0, font: "inherit" }}
+                              onClick={() => setFiltre(t)}
+                              title={"Filtrer sur cette \u00e9tiquette"}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <span className="mono">{c.run_time ?? c.cron_expression ?? '—'}</span>
@@ -157,6 +220,13 @@ export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
                           </button>
                           <button className="btn ghost sm" onClick={() => basculer(c)}>
                             {c.enabled ? 'Pause' : 'Reprendre'}
+                          </button>
+                          <button
+                            className="btn ghost sm"
+                            onClick={() => dupliquer(c)}
+                            title={"Cr\u00e9er une cible identique, en pause"}
+                          >
+                            Dupliquer
                           </button>
                         </>
                       )}
