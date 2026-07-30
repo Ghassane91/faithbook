@@ -30,3 +30,7 @@ FaithBook-source*.zip
 deliverable/
 # Cache de build TypeScript.
 frontend/tsconfig.tsbuildinfo
+
+# Sauvegardes de configuration : contiennent des secrets
+.env.bak*
+comparaison_run*.png
