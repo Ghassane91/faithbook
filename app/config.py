@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     # une fermeture qui se fige laisse le verrou de profil pris pour toujours.
     login_lock_wait_seconds: int = 5
     login_close_timeout_seconds: int = 10
+
+    # --- Rattrapage des captures manquees ---
+    # La tolerance aux retards d APScheduler ne couvre que les taches deja
+    # enregistrees. Apres un arret complet de la machine, la journee manquee
+    # serait perdue : on la rattrape explicitement au demarrage.
+    catchup_missed_runs: bool = True
+    catchup_max_hours: int = 20
+    catchup_delay_seconds: int = 30
     # Duree de vie du jeton qui autorise l'acces a /novnc et /websockify (courte
     # et independante de login_timeout_minutes : la fenetre d'exposition doit
     # rester minimale meme si la connexion manuelle elle-meme dure plus longtemps).

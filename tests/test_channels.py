@@ -8,14 +8,26 @@ from app.config import settings
 from app.services import channels, notify
 
 
+@pytest.fixture(autouse=True)
+def canaux_neutres(monkeypatch):
+    """Part toujours d une configuration vide.
+
+    Sans cela, ces tests dependraient du .env de la machine : depuis que
+    Telegram y est configure, ils echouaient sur un produit pourtant sain.
+    """
+    monkeypatch.setattr(settings, "notify_telegram_bot_token", "")
+    monkeypatch.setattr(settings, "notify_telegram_chat_id", "")
+    monkeypatch.setattr(settings, "notify_webhook_url", "")
+
+
 @pytest.fixture
-def telegram(monkeypatch):
+def telegram(monkeypatch, canaux_neutres):
     monkeypatch.setattr(settings, "notify_telegram_bot_token", "jeton")
     monkeypatch.setattr(settings, "notify_telegram_chat_id", "12345")
 
 
 @pytest.fixture
-def webhook(monkeypatch):
+def webhook(monkeypatch, canaux_neutres):
     monkeypatch.setattr(settings, "notify_webhook_url", "https://exemple.test/hook")
 
 
