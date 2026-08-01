@@ -94,3 +94,27 @@ telephone, sans qu une seule ligne de code soit en cause.
 
 **« Teste » et « en service » sont deux etats differents.** Le README et la
 page d inventaire les distinguent explicitement pour cette raison.
+
+---
+
+## Motif 5 — Une ressource tenue plus longtemps que necessaire
+
+| Ou | Ce qui etait tenu | Consequence |
+|---|---|---|
+| `runner.py:126` | Une transaction ouverte pendant toute la capture | Une seconde capture attendait son verrou sans fin ; la boucle du backend est restee figee 1 h 29 |
+
+Le service repondait encore : le journal montrait des `200 OK`. Mais chaque
+reponse arrivait apres le delai de la sonde de sante, qui abandonne a 5 s.
+Docker a donc declare le backend mort, et le frontend, qui depend de sa bonne
+sante, n a jamais demarre. **L interface a disparu au moment precis ou elle
+aurait servi a comprendre.**
+
+**La question a poser :** cette ressource est-elle tenue pendant une operation
+lente ? Un verrou, une transaction ou une connexion ne devraient jamais
+traverser une capture de plusieurs minutes.
+
+**Correctif applique :** deux bornes cote PostgreSQL. Une attente de verrou
+echoue au bout de 10 s au lieu d attendre sans fin, et une transaction laissee
+inactive 10 min est supprimee. Ce n est pas la correction de fond -- il
+faudrait cesser de tenir une transaction pendant une capture -- mais elle
+transforme un blocage total du service en une seule requete en erreur.

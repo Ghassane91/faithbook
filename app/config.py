@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     catchup_missed_runs: bool = True
     catchup_max_hours: int = 20
     catchup_delay_seconds: int = 30
+
+    # Garde-fous PostgreSQL : voir DEFAUTS.md, blocage du 01/08.
+    db_lock_timeout_ms: int = 10000
+    db_idle_tx_timeout_ms: int = 600000
     # Duree de vie du jeton qui autorise l'acces a /novnc et /websockify (courte
     # et independante de login_timeout_minutes : la fenetre d'exposition doit
     # rester minimale meme si la connexion manuelle elle-meme dure plus longtemps).

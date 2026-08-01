@@ -8,7 +8,22 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import settings
 from app.models import Base
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+def _connect_args(url: str) -> dict:
+    """Options de connexion selon le moteur.
+
+    Sans limite, une capture attendait un verrou indefiniment et figeait
+    la boucle du backend. Voir DEFAUTS.md, blocage du 01/08.
+    """
+    if url.startswith("sqlite"):
+        return {"check_same_thread": False}
+    reglages = "-c lock_timeout=%d -c idle_in_transaction_session_timeout=%d"
+    return {
+        "options": reglages
+        % (settings.db_lock_timeout_ms, settings.db_idle_tx_timeout_ms)
+    }
+
+
+connect_args = _connect_args(settings.database_url)
 
 engine = create_engine(settings.database_url, connect_args=connect_args, future=True)
 

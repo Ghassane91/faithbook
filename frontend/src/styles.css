@@ -20,6 +20,22 @@
   --cyan-bright: #9b3342;
   --cyan-wash: #f2e7e8;
 
+  /* Couleurs du changement, empruntees aux couches d une image mal
+     superposee : cyan pour ce qui apparait, magenta pour ce qui
+     disparait. Versions encre, lisibles sur le papier clair. */
+  --apparu: #0e6e82;
+  --apparu-wash: #e2eff2;
+  --disparu: #8e2b62;
+  --disparu-wash: #f6e7ef;
+
+  /* Couleurs du changement, empruntees aux couches d une image mal
+     superposee : cyan pour ce qui apparait, magenta pour ce qui
+     disparait. Versions encre, lisibles sur le papier clair. */
+  --apparu: #0e6e82;
+  --apparu-wash: #e2eff2;
+  --disparu: #8e2b62;
+  --disparu-wash: #f6e7ef;
+
   --safelight: #a33a2d;
   --safelight-wash: #f5e8e4;
   --ok: #2f6b54;
@@ -264,7 +280,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tag.running,
 .tag.pending { background: var(--wait-wash); color: var(--wait); }
 .tag.off { background: var(--surface-sunk); color: var(--ink-faint); }
-.tag.changed { background: var(--cyan-wash); color: var(--cyan); font-weight: 600; }
+.tag.changed { background: var(--apparu-wash); color: var(--apparu); font-weight: 600; }
+.tag.removed { background: var(--disparu-wash); color: var(--disparu); font-weight: 600; }
+.tag.removed { background: var(--disparu-wash); color: var(--disparu); font-weight: 600; }
 
 /* --- Badge « modifiée » sur une vignette de la planche ----------------- */
 .frame-window { position: relative; }
