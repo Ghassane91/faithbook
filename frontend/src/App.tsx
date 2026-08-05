@@ -5,6 +5,7 @@ import { RunDetail } from './components/RunDetail'
 import { delai, useData, useRoute } from './lib'
 import { ChangerMotDePasse } from './views/ChangerMotDePasse'
 import { AccepterInvitation } from './views/AccepterInvitation'
+import { Accueil } from './views/Accueil'
 import { Cibles } from './views/Cibles'
 import { Comptes } from './views/Comptes'
 import { Connexion } from './views/Connexion'
@@ -16,12 +17,23 @@ import { Reinitialiser } from './views/Reinitialiser'
 import type { OrganizationUsage } from './types'
 
 const VUES = [
+  { cle: 'accueil', idx: '00', titre: 'Accueil', icon: 'board' },
   { cle: 'planche', idx: '01', titre: 'Planche du jour', icon: 'board' },
   { cle: 'cibles', idx: '02', titre: 'Cibles', icon: 'target' },
   { cle: 'comptes', idx: '03', titre: 'Comptes', icon: 'account' },
   { cle: 'historique', idx: '04', titre: 'Historique', icon: 'history' },
   { cle: 'organisation', idx: '05', titre: 'Équipe', icon: 'team' },
 ]
+
+function dateEditoriale() {
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  })
+    .format(new Date())
+    .toUpperCase()
+}
 
 export default function App() {
   const { user, pret } = useAuth()
@@ -108,6 +120,7 @@ function AppConnecte() {
       organisationActive?.role === 'owner' ||
       organisationActive?.role === 'admin',
   )
+  const vueActive = vues.find((vue) => vue.cle === route)
 
   useEffect(() => {
     if (!organisations?.length) return
@@ -129,11 +142,15 @@ function AppConnecte() {
   }
 
   return (
-    <div className="shell">
+    <div className="shell app-workspace">
       <nav className="rail">
         <div className="brand">
           <span className="brand-mark">FaithBook</span>
           <span className="brand-sub">veille visuelle</span>
+          <span className="brand-registration" aria-hidden="true">
+            <i />
+            <i />
+          </span>
         </div>
 
         {organisations && organisations.length > 0 && (
@@ -229,27 +246,41 @@ function AppConnecte() {
       </nav>
 
       <main className="main">
-        {route === 'cibles' ? (
-          <Cibles
-            onOuvrirRun={setRunOuvert}
-            canEdit={canEdit}
-            canDelete={canAdmin}
-          />
-        ) : route === 'comptes' ? (
-          <Comptes canAdmin={canAdmin} />
-        ) : route === 'historique' ? (
-          <Historique onOuvrirRun={setRunOuvert} />
-        ) : route === 'organisation' ? (
-          <Organisation
-            organization={organisationActive ?? null}
-            health={sante ?? null}
-            usage={usage ?? null}
-          />
-        ) : route === 'mentions' ? (
-          <MentionsLegales />
-        ) : (
-          <Planche onOuvrirRun={setRunOuvert} onAllerCibles={() => aller('cibles')} />
-        )}
+        <header className="workspace-topbar">
+          <span>
+            FAITHBOOK <i>/</i> {vueActive?.titre ?? 'DOCUMENT'} <i>/</i> {dateEditoriale()}
+          </span>
+          <span className={`workspace-live ${sante?.scheduler_running ? '' : 'down'}`}>
+            <i />
+            {sante?.scheduler_running ? 'VEILLE EN COURS' : 'VEILLE INTERROMPUE'}
+          </span>
+        </header>
+
+        <div className="workspace-view" key={route}>
+          {route === 'accueil' ? (
+            <Accueil onAller={aller} />
+          ) : route === 'cibles' ? (
+            <Cibles
+              onOuvrirRun={setRunOuvert}
+              canEdit={canEdit}
+              canDelete={canAdmin}
+            />
+          ) : route === 'comptes' ? (
+            <Comptes canAdmin={canAdmin} />
+          ) : route === 'historique' ? (
+            <Historique onOuvrirRun={setRunOuvert} />
+          ) : route === 'organisation' ? (
+            <Organisation
+              organization={organisationActive ?? null}
+              health={sante ?? null}
+              usage={usage ?? null}
+            />
+          ) : route === 'mentions' ? (
+            <MentionsLegales />
+          ) : (
+            <Planche onOuvrirRun={setRunOuvert} onAllerCibles={() => aller('cibles')} />
+          )}
+        </div>
 
         <footer className="app-foot mono">
           <button className="linklike" onClick={() => aller('mentions')}>

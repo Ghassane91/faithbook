@@ -34,3 +34,9 @@ frontend/tsconfig.tsbuildinfo
 # Sauvegardes de configuration : contiennent des secrets
 .env.bak*
 comparaison_run*.png
+
+# Archives et copies de travail, jamais versionnees
+/FaithBook-frontend-editorial/
+/FaithBook-frontend-editorial.zip
+/backup/
+/faithbook/
