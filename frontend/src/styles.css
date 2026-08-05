@@ -3834,3 +3834,23 @@ details.advanced > summary {
   hyphens: none;
   max-width: 40rem;
 }
+
+/* ---------- plafond global sur les titres de niveau 1 ---------- */
+/* FaithBook est un outil de travail, pas une page de campagne : un titre qui
+   occupe l ecran entier repousse l information utile sous la ligne de
+   flottaison. On plafonne donc tous les h1.
+
+   Regle volontairement globale : les heros viennent de sessions differentes
+   et je n ai pas la liste de leurs classes. Un ciblage precis remplacera ceci
+   des que les noms seront connus — ce bloc est fait pour etre supprime. */
+
+h1 {
+  font-size: clamp(1.5rem, 3.6vw, 2.6rem) !important;
+  line-height: 1.04;
+  letter-spacing: -0.018em;
+}
+/* Contour calcule pour un tres grand corps : a cette taille, 1px alourdit la
+   ligne creuse au point qu elle parait plus foncee que les pleines. */
+.creux {
+  -webkit-text-stroke-width: 0.75px;
+}
