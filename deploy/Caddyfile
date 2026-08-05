@@ -1,0 +1,61 @@
+# Entree HTTPS de FaithBook.
+# Le domaine vient de FAITHBOOK_DOMAINE, defini dans .env sur le VPS.
+# Caddy demande le certificat Let's Encrypt au premier demarrage et le
+# renouvelle seul : il n'y a rien a programmer.
+
+{$FAITHBOOK_DOMAINE} {
+    encode zstd gzip
+
+    # En-tetes de base. HSTS n'est active qu'une fois le certificat obtenu :
+    # le poser avant enfermerait le navigateur sur un site injoignable.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # nginx (service frontend) sert l'application et relaie deja /api vers le
+    # backend. Caddy n'a donc qu'un seul amont a connaitre.
+    reverse_proxy frontend:80
+
+    log {
+        output file /data/faithbook-access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# noVNC : la fenetre par laquelle tu te connectes a Facebook.
+#
+# A DECIDER AVANT DE L'OUVRIR. Cette fenetre donne un controle direct sur un
+# navigateur deja authentifie sur tes comptes Facebook. Publiee sans
+# protection, elle vaut le mot de passe de ces comptes.
+#
+# Trois options, de la plus sure a la plus pratique :
+#
+# 1. Ne pas l'exposer du tout. Pour t'y connecter, un tunnel SSH depuis ton
+#    poste, le temps de la manipulation :
+#
+#      ssh -L 6080:localhost:6080 faithbook@TON_VPS
+#      puis http://localhost:6080 dans ton navigateur
+#
+#    C'est l'option retenue par defaut : rien a activer ici.
+#
+# 2. L'exposer derriere une authentification Caddy. Decommente le bloc
+#    ci-dessous apres avoir genere le hachage :
+#
+#      docker run --rm caddy:2-alpine caddy hash-password --plaintext 'mot-de-passe'
+#
+# 3. L'exposer sans protection : a ne jamais faire.
+# ---------------------------------------------------------------------------
+
+# vnc.{$FAITHBOOK_DOMAINE} {
+#     basic_auth {
+#         ghassane REMPLACER_PAR_LE_HACHAGE
+#     }
+#     reverse_proxy backend:6080
+# }

@@ -1,0 +1,90 @@
+# Surcouche production. Ne s'utilise JAMAIS seule : elle complete le fichier
+# de base, elle ne le remplace pas.
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+#
+# Avec le resume IA local (VPS d'au moins 8 Go de RAM) :
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+#     --profile ia-locale up -d
+#
+# Remarque importante sur les ports : Docker Compose *ajoute* les ports d'une
+# surcouche a ceux du fichier de base, il ne les remplace pas. Le port 3000 du
+# frontend reste donc publie. C'est le pare-feu qui doit le fermer (voir
+# VPS.md, etape 3), et non ce fichier. Une regle ufw est plus sure qu'une
+# subtilite de fusion YAML que le prochain qui lit le fichier ignorera.
+
+services:
+  # --- Entree HTTPS -------------------------------------------------------
+  # Caddy obtient et renouvelle le certificat Let's Encrypt tout seul.
+  # Aucune commande certbot, aucun cron de renouvellement a surveiller.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      FAITHBOOK_DOMAINE: ${FAITHBOOK_DOMAINE:?definir FAITHBOOK_DOMAINE dans .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    logging: &journal
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # --- Services existants : redemarrage et journaux bornes ----------------
+  frontend:
+    restart: unless-stopped
+    logging: *journal
+
+  backend:
+    restart: unless-stopped
+    logging: *journal
+
+  worker:
+    restart: unless-stopped
+    logging: *journal
+    # Chromium ecrit ses tampons dans /dev/shm, limite a 64 Mo par defaut chez
+    # Docker. Sur une page Facebook de 40 000 px de haut, il tombe a court et
+    # l'onglet meurt en plein defilement. La capture echoue alors sans erreur
+    # explicite : c'est exactement le genre de panne qu'on met deux jours a
+    # diagnostiquer.
+    shm_size: "1gb"
+
+  db:
+    restart: unless-stopped
+    logging: *journal
+
+  redis:
+    restart: unless-stopped
+    logging: *journal
+
+  egress-proxy:
+    restart: unless-stopped
+    logging: *journal
+
+  # --- Resume IA local, optionnel ----------------------------------------
+  # Ne demarre qu'avec --profile ia-locale. Aucun port publie : seuls les
+  # conteneurs du reseau interne l'atteignent.
+  #
+  # Sur le VPS, mettre dans .env :
+  #   OLLAMA_BASE_URL=http://ollama:11434
+  # (et non host.docker.internal, qui n'existe que sur ton poste Windows)
+  ollama:
+    profiles: ["ia-locale"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    logging: *journal
+
+volumes:
+  caddy_data:
+  caddy_config:
+  ollama_models:
