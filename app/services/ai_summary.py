@@ -1,13 +1,16 @@
 """Synthese par IA des changements detectes entre deux captures.
 
-Fonctionnalite optionnelle : sans cle API, FaithBook fonctionne a
-l identique et cette couche renvoie simplement None.
+Deux fournisseurs sont disponibles : Anthropic (API distante) et Ollama
+(modele local). La fonctionnalite reste optionnelle et une panne du fournisseur
+ne doit jamais faire echouer une capture.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+
+import httpx
 
 from app.config import settings
 
@@ -35,8 +38,12 @@ class ResumeIndisponible(RuntimeError):
 
 
 def is_configured() -> bool:
-    """Vrai seulement si la fonctionnalite est activee ET la cle presente."""
-    return bool(settings.ai_summary_enabled and settings.anthropic_api_key)
+    """Vrai si le fournisseur choisi possede sa configuration minimale."""
+    if not settings.ai_summary_enabled:
+        return False
+    if settings.ai_summary_provider == "ollama":
+        return bool(settings.ollama_base_url.strip() and settings.ollama_model.strip())
+    return bool(settings.anthropic_api_key and settings.ai_summary_model.strip())
 
 
 def _get_client():
@@ -54,6 +61,60 @@ def _get_client():
                     max_retries=settings.ai_summary_retries,
                 )
     return _client
+
+
+def _resumer_anthropic(invite: str) -> str | None:
+    client = _get_client()
+    reponse = client.messages.create(
+        model=settings.ai_summary_model,
+        max_tokens=400,
+        system=INSTRUCTIONS,
+        messages=[{"role": "user", "content": invite}],
+    )
+    if getattr(reponse, "stop_reason", None) == "refusal":
+        logger.warning("Synthese IA refusee par le modele Anthropic.")
+        return None
+    morceaux = [
+        bloc.text for bloc in reponse.content if getattr(bloc, "type", None) == "text"
+    ]
+    texte = "\n".join(morceaux).strip()
+    return texte or None
+
+
+def _resumer_ollama(invite: str) -> str | None:
+    """Interroge Ollama directement, sans suivre le proxy HTTP du navigateur."""
+    base_url = settings.ollama_base_url.rstrip("/")
+    charge = {
+        "model": settings.ollama_model,
+        "stream": False,
+        "keep_alive": settings.ollama_keep_alive,
+        "messages": [
+            {"role": "system", "content": INSTRUCTIONS},
+            {"role": "user", "content": invite},
+        ],
+        "options": {
+            "temperature": 0.1,
+            "num_predict": settings.ollama_num_predict,
+        },
+    }
+    # trust_env=False est indispensable : le worker possede un proxy sortant
+    # pour Chromium, mais une adresse locale Windows ne doit jamais passer par lui.
+    with httpx.Client(
+        timeout=settings.ollama_timeout_seconds,
+        trust_env=False,
+    ) as client:
+        reponse = client.post(f"{base_url}/api/chat", json=charge)
+        reponse.raise_for_status()
+    donnees = reponse.json()
+    texte = str((donnees.get("message") or {}).get("content") or "").strip()
+    logger.info(
+        "Synthese IA locale terminee (modele=%s, entree=%s, sortie=%s, duree_ms=%s)",
+        settings.ollama_model,
+        donnees.get("prompt_eval_count", "?"),
+        donnees.get("eval_count", "?"),
+        round((donnees.get("total_duration") or 0) / 1_000_000),
+    )
+    return texte or None
 
 
 def _bloc(titre: str, lignes: list[str]) -> str:
@@ -93,26 +154,14 @@ def resumer_changements(ajoutees, retirees, titre_page=None) -> str | None:
     if not is_configured() or (not ajoutees and not retirees):
         return None
     try:
-        client = _get_client()
-        reponse = client.messages.create(
-            model=settings.ai_summary_model,
-            max_tokens=400,
-            system=INSTRUCTIONS,
-            messages=[
-                {
-                    "role": "user",
-                    "content": construire_invite(ajoutees, retirees, titre_page),
-                }
-            ],
-        )
+        invite = construire_invite(ajoutees, retirees, titre_page)
+        if settings.ai_summary_provider == "ollama":
+            return _resumer_ollama(invite)
+        return _resumer_anthropic(invite)
     except Exception as exc:  # noqa: BLE001 - jamais bloquant pour la capture
-        logger.warning("Synthese IA indisponible : %s", exc)
+        logger.warning(
+            "Synthese IA indisponible (fournisseur=%s) : %s",
+            settings.ai_summary_provider,
+            exc,
+        )
         return None
-    if getattr(reponse, "stop_reason", None) == "refusal":
-        logger.warning("Synthese IA refusee par le modele.")
-        return None
-    morceaux = [
-        bloc.text for bloc in reponse.content if getattr(bloc, "type", None) == "text"
-    ]
-    texte = "\n".join(morceaux).strip()
-    return texte or None

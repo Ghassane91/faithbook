@@ -43,7 +43,7 @@ phase livre un commit propre, ses tests, et cette section a jour.
 | 3d.1 | **Client S3 et routage du stockage** : client compatible S3 (AWS, Backblaze B2, Wasabi, MinIO), selection par STORAGE_BACKEND, envoi sans doublon et reprise automatique, 8 tests | ✅ Fait — v1.9.0 |
 | 3d.2 | **Liens signes regeneres a la demande** : route GET /api/runs/{id}/lien qui recalcule l URL signee a chaque appel (une URL signee expire, elle ne peut pas etre lue en base), bouton du detail d execution branche dessus, cles de stockage passees en texte long pour ne plus tronquer une cle S3 (migration d6e7f8a9b0c1), 4 tests | ✅ Fait — v1.9.0 |
 | 4.1 | **Comparaison de contenu plutot que de pixels** : le texte visible de chaque page est conserve et compare ligne a ligne, sans tenir compte de l ordre. Un fil social reordonne sans publication nouvelle donne desormais 0 % au lieu de 46 %. La comparaison pixel reste le repli pour les pages sans texte exploitable. 8 tests | ✅ Fait — v1.10.0 |
-| 5.1 | **Synthese IA des changements** : les lignes apparues et disparues entre deux captures sont envoyees a Claude, qui redige en francais ce qui a reellement change. Desactivee par defaut (AI_SUMMARY_ENABLED + ANTHROPIC_API_KEY) : sans cle, FaithBook fonctionne exactement comme avant, et une panne de l API ne fait jamais echouer une capture. Migration f8a9b0c1d2e3, 15 tests | ✅ Fait — v1.11.0 |
+| 5.1 | **Synthese IA des changements** : les lignes apparues et disparues entre deux captures sont resumees en francais par Anthropic ou gratuitement en local par Ollama. Desactivee par defaut ; une panne du fournisseur ne fait jamais echouer une capture. Migration f8a9b0c1d2e3, tests sans reseau | ✅ Fait — v1.11.0, fournisseur Ollama ajoute ensuite |
 | 6.1 | **Alertes multi-canaux** : en plus du mail, chaque alerte peut partir sur Telegram et sur un webhook unique compris par Slack, Discord et n8n. Canaux independants et inactifs par defaut ; une panne d un canal n empeche ni les autres ni la capture. Le resume IA est desormais inclus dans le mail de changement. 11 tests | ✅ Fait — v1.12.0 |
 | 7.1 | **Etiquettes et duplication accessibles depuis l interface** : les etiquettes s affichent sous chaque cible et filtrent la liste en un clic, un bandeau rappelle le filtre actif avec un moyen d en sortir, et un bouton Dupliquer cree une copie en pause. Le serveur savait deja tout faire ; aucun ecran ne le proposait. | ✅ Fait — v1.13.0 |
 | 4–8 | Comparaison avancée, analyse de contenu (IA optionnelle), alertes multi-canaux, gestion de cibles avancée et plans commerciaux | ⏳ À faire |
@@ -401,6 +401,35 @@ sur la zone commune et l'écart de hauteur).
 
 C'est ce qui transforme FaithBook d'un archiveur en **outil de veille** : on ne
 regarde que ce qui a bougé.
+
+### Résumé IA : Anthropic ou Ollama local
+
+Quand une page est marquée « modifiée », FaithBook compare son texte à la
+capture précédente et peut produire un résumé en trois phrases. Le résultat est
+stocké sur l'exécution, affiché dans son détail et inclus dans l'alerte de
+changement. La capture reste réussie même si le fournisseur IA est indisponible.
+
+Pour fonctionner gratuitement sur le poste Windows avec Ollama :
+
+```env
+AI_SUMMARY_ENABLED=true
+AI_SUMMARY_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen2.5:7b-instruct
+OLLAMA_TIMEOUT_SECONDS=180
+OLLAMA_KEEP_ALIVE=5m
+OLLAMA_NUM_PREDICT=180
+```
+
+Le worker ignore volontairement le proxy HTTP de Chromium pour cet appel local.
+Pour revenir à l'API Anthropic, choisir `AI_SUMMARY_PROVIDER=anthropic`, puis
+renseigner `ANTHROPIC_API_KEY` et `AI_SUMMARY_MODEL`.
+
+Sur Facebook, les libellés de présence `En ligne`, `Hors ligne` et leurs
+indicateurs de statut sont retirés avant le calcul du taux de changement et
+avant l'appel IA. Ce filtre est limité aux URL Facebook : le même texte reste
+significatif sur un autre site. Cela évite une fausse modification, un appel au
+modèle et une alerte lorsque seule l'interface Facebook a bougé.
 
 ---
 

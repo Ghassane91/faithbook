@@ -136,10 +136,20 @@ class Settings(BaseSettings):
     s3_signed_url_ttl_seconds: int = 900
 
     # --- Synthese IA des changements (optionnelle, desactivee par defaut) ---
+    # anthropic : API distante payante ; ollama : modele local sans cle externe.
+    ai_summary_provider: Literal["anthropic", "ollama"] = "anthropic"
     anthropic_api_key: str = ""
     ai_summary_enabled: bool = False
     ai_summary_model: str = "claude-opus-5"
     ai_summary_retries: int = 2
+    # Depuis Docker Desktop, Ollama sur Windows est joignable via ce nom.
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model: str = "qwen2.5:7b-instruct"
+    # Le premier chargement d un modele local peut prendre plus d une minute.
+    ollama_timeout_seconds: int = 180
+    # Garde le modele chaud un court instant sans monopoliser durablement la RAM.
+    ollama_keep_alive: str = "5m"
+    ollama_num_predict: int = 180
 
     # --- Canaux d alerte complementaires (vides = inactifs) ---
     notify_telegram_bot_token: str = ""

@@ -27,6 +27,12 @@ os.environ["LOG_FILE"] = os.path.join(_TEST_DIR, "app.log")
 # celui qui doit etre teste : ne pas laisser un .env local le changer.
 os.environ["ALLOWED_DOMAINS"] = ""
 os.environ["ALLOW_PRIVATE_TARGETS"] = "false"
+# Les tests de fournisseurs IA simulent tous les appels. Une configuration
+# reelle dans le .env de la machine ne doit jamais declencher de reseau ni
+# changer le resultat de la suite.
+os.environ["AI_SUMMARY_ENABLED"] = "false"
+os.environ["AI_SUMMARY_PROVIDER"] = "anthropic"
+os.environ["ANTHROPIC_API_KEY"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

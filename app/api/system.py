@@ -12,7 +12,7 @@ from app.database import engine, get_session
 from app.models import Target
 from app.scheduler import JOB_PREFIX, scheduler
 from app.schemas import DriveCheckOut, HealthOut, JobOut
-from app.services import run_queue, tenancy
+from app.services import ai_summary, run_queue, tenancy
 from app.services.drive import DriveNotConfigured, drive_client
 
 router = APIRouter(prefix="/api", tags=["Systeme"])
@@ -111,6 +111,16 @@ def get_config():
         "queue_backend": settings.queue_backend,
         "storage_backend": settings.storage_backend,
         "drive_configured": drive_client.is_configured(),
+        "ai_summary": {
+            "enabled": settings.ai_summary_enabled,
+            "provider": settings.ai_summary_provider,
+            "model": (
+                settings.ollama_model
+                if settings.ai_summary_provider == "ollama"
+                else settings.ai_summary_model
+            ),
+            "configured": ai_summary.is_configured(),
+        },
     }
 
 
