@@ -142,18 +142,46 @@ def image_change_ratio(before: Path, after: Path) -> float | None:
 # separateurs) et non du contenu : on l ignore pour comparer deux pages.
 _TEXT_MIN_LEN = 8
 
+# Libelles de presence injectes par l interface Facebook. Ils peuvent changer
+# sans qu une publication ni la page surveillee n aient change. La liste reste
+# volontairement stricte et limitee a Facebook : « En ligne » peut etre une
+# information metier legitime sur un autre site.
+_FACEBOOK_UI_NOISE = frozenset(
+    {
+        "en ligne",
+        "hors ligne",
+        "indicateur de statut en ligne",
+        "indicateur de statut hors ligne",
+    }
+)
 
-def _lignes_utiles(text: str) -> set[str]:
+
+def _is_facebook_url(source_url: str | None) -> bool:
+    if not source_url:
+        return False
+    host = (urlparse(source_url).hostname or "").lower()
+    return host == "facebook.com" or host.endswith(".facebook.com")
+
+
+def _is_ui_noise(ligne: str, source_url: str | None) -> bool:
+    return _is_facebook_url(source_url) and ligne.casefold() in _FACEBOOK_UI_NOISE
+
+
+def _lignes_utiles(text: str, source_url: str | None = None) -> set[str]:
     """Lignes de contenu d une page, normalisees pour la comparaison."""
     lignes: set[str] = set()
     for brute in text.splitlines():
         ligne = " ".join(brute.split())
-        if len(ligne) >= _TEXT_MIN_LEN:
+        if len(ligne) >= _TEXT_MIN_LEN and not _is_ui_noise(ligne, source_url):
             lignes.add(ligne.casefold())
     return lignes
 
 
-def text_change_ratio(before: str | None, after: str | None) -> float | None:
+def text_change_ratio(
+    before: str | None,
+    after: str | None,
+    source_url: str | None = None,
+) -> float | None:
     """Proportion (0..1) de lignes de texte apparues ou disparues.
 
     Insensible a l ordre : un fil de publications reordonne, sans contenu
@@ -166,8 +194,8 @@ def text_change_ratio(before: str | None, after: str | None) -> float | None:
     """
     if not before or not after:
         return None
-    avant = _lignes_utiles(before)
-    apres = _lignes_utiles(after)
+    avant = _lignes_utiles(before, source_url)
+    apres = _lignes_utiles(after, source_url)
     if not avant or not apres:
         return None
     union = avant | apres
@@ -176,26 +204,31 @@ def text_change_ratio(before: str | None, after: str | None) -> float | None:
     return round(len(avant ^ apres) / len(union), 4)
 
 
-def _lignes_indexees(text: str) -> dict[str, str]:
+def _lignes_indexees(
+    text: str,
+    source_url: str | None = None,
+) -> dict[str, str]:
     """Lignes utiles indexees par forme normalisee -> texte d origine."""
     index: dict[str, str] = {}
     for brute in text.splitlines():
         ligne = " ".join(brute.split())
-        if len(ligne) >= _TEXT_MIN_LEN:
+        if len(ligne) >= _TEXT_MIN_LEN and not _is_ui_noise(ligne, source_url):
             index.setdefault(ligne.casefold(), ligne)
     return index
 
 
 def diff_lignes(
-    before: str | None, after: str | None
+    before: str | None,
+    after: str | None,
+    source_url: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Lignes apparues puis lignes disparues entre deux captures.
 
     On garde le texte d origine et son ordre : la synthese IA doit
     recevoir des phrases lisibles, pas des cles normalisees.
     """
-    avant = _lignes_indexees(before or "")
-    apres = _lignes_indexees(after or "")
+    avant = _lignes_indexees(before or "", source_url)
+    apres = _lignes_indexees(after or "", source_url)
     ajoutees = [texte for cle, texte in apres.items() if cle not in avant]
     retirees = [texte for cle, texte in avant.items() if cle not in apres]
     return ajoutees, retirees

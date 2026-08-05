@@ -50,3 +50,23 @@ def test_espaces_et_casse_normalises():
 def test_lignes_utiles_filtre_le_decor():
     lignes = _lignes_utiles("contenu suffisamment long\nok\n\n   \nautre ligne de contenu")
     assert lignes == {"contenu suffisamment long", "autre ligne de contenu"}
+
+
+def test_statut_facebook_ne_declenche_pas_de_changement():
+    avant = "Publication SPYPOINT toujours visible"
+    apres = avant + "\nIndicateur de statut En ligne\nEn ligne"
+
+    assert (
+        text_change_ratio(avant, apres, "https://www.facebook.com/SPYPOINT.CA")
+        == 0.0
+    )
+
+
+def test_en_ligne_reste_significatif_hors_facebook():
+    avant = "Produit actuellement indisponible"
+    apres = avant + "\nEn ligne"
+
+    ratio = text_change_ratio(avant, apres, "https://boutique.example.com")
+
+    assert ratio is not None
+    assert ratio > 0

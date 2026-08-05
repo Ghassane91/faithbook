@@ -273,15 +273,23 @@ async def execute_run(run_id: int, force: bool = False) -> None:
             notify_failure(target, run)
 
 
-async def _resume_ia(prev: Run, result) -> str | None:
+async def _resume_ia(
+    prev: Run,
+    result,
+    source_url: str | None = None,
+) -> str | None:
     """Synthese IA du contenu apparu depuis la capture precedente.
 
-    Desactivee par defaut : sans cle API on renvoie None sans rien tenter,
-    et une panne du service ne fait jamais echouer la capture.
+    Desactivee par defaut : sans fournisseur configure on renvoie None sans
+    rien tenter, et une panne du service ne fait jamais echouer la capture.
     """
     if not ai_summary.is_configured():
         return None
-    ajoutees, retirees = diff_lignes(prev.body_text, result.body_text)
+    ajoutees, retirees = diff_lignes(
+        prev.body_text,
+        result.body_text,
+        source_url,
+    )
     if not ajoutees and not retirees:
         return None
     return await asyncio.to_thread(
@@ -434,7 +442,7 @@ async def _attempt_once(
         # donc un fil reordonne sans contenu nouveau ne compte pas comme un
         # changement. Repli sur les pixels si le texte manque (anciens runs,
         # page sans texte exploitable).
-        ratio = text_change_ratio(prev.body_text, result.body_text)
+        ratio = text_change_ratio(prev.body_text, result.body_text, target.url)
         if ratio is None and prev.screenshot_path and Path(prev.screenshot_path).exists():
             ratio = await asyncio.to_thread(
                 image_change_ratio, Path(prev.screenshot_path), destination
@@ -448,7 +456,7 @@ async def _attempt_once(
                 log_step(session, run, "diff",
                          f"Page modifiée : {pct} % de changement depuis la capture précédente",
                          attempt=attempt)
-                run.ai_summary = await _resume_ia(prev, result)
+                run.ai_summary = await _resume_ia(prev, result, target.url)
                 if run.ai_summary:
                     session.commit()
                     log_step(session, run, "ia", run.ai_summary, attempt=attempt)
