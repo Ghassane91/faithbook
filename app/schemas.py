@@ -204,6 +204,12 @@ class TargetBase(BaseModel):
     cron_expression: str | None = Field(
         default=None, description="Cron 5 champs, prioritaire sur run_time"
     )
+    interval_minutes: int | None = Field(
+        default=None,
+        ge=1,
+        le=1440,
+        description="Capture toutes les N minutes, prioritaire sur cron et run_time",
+    )
     timezone_name: str | None = Field(default=None, description="Defaut : TIMEZONE globale")
 
     viewport_width: int | None = Field(default=None, ge=320, le=3840)
@@ -254,8 +260,15 @@ class TargetBase(BaseModel):
 class TargetCreate(TargetBase):
     @model_validator(mode="after")
     def _needs_schedule(self):
-        if self.enabled and not self.run_time and not self.cron_expression:
-            raise ValueError("Une cible active doit avoir run_time ou cron_expression")
+        if (
+            self.enabled
+            and not self.run_time
+            and not self.cron_expression
+            and not self.interval_minutes
+        ):
+            raise ValueError(
+                "Une cible active doit avoir run_time, cron_expression ou interval_minutes"
+            )
         return self
 
 
@@ -269,6 +282,7 @@ class TargetUpdate(BaseModel):
     enabled: bool | None = None
     run_time: str | None = None
     cron_expression: str | None = None
+    interval_minutes: int | None = Field(default=None, ge=1, le=1440)
     timezone_name: str | None = None
     viewport_width: int | None = Field(default=None, ge=320, le=3840)
     viewport_height: int | None = Field(default=None, ge=320, le=2160)

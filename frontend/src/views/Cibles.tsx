@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { StatsCible } from '../components/StatsCible'
 import { TargetForm } from '../components/TargetForm'
-import { dateHeure, delai, STATUS_LABEL, useData } from '../lib'
+import { cadence, dateHeure, delai, STATUS_LABEL, useData } from '../lib'
 import type { Target } from '../types'
 
 interface Props {
@@ -166,7 +166,7 @@ export function Cibles({ onOuvrirRun, canEdit, canDelete }: Props) {
                     )}
                   </td>
                   <td>
-                    <span className="mono">{c.run_time ?? c.cron_expression ?? '—'}</span>
+                    <span className="mono">{cadence(c)}</span>
                     <div style={{ marginTop: 4 }}>
                       <span className={`tag ${c.enabled ? 'on' : 'off'}`}>
                         {c.enabled ? 'active' : 'en pause'}

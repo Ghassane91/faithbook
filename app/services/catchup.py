@@ -37,6 +37,11 @@ def cibles_a_rattraper(maintenant: datetime | None = None) -> list[int]:
     with session_scope() as session:
         cibles = session.scalars(select(Target).where(Target.enabled.is_(True))).all()
         for cible in cibles:
+            # Les cibles a intervalle sont volontairement exclues : leur
+            # prochaine echeance est au plus a `interval_minutes` d ici, un
+            # rattrapage au demarrage ferait doublon pour rien.
+            if cible.interval_minutes:
+                continue
             if not (cible.run_time or cible.cron_expression):
                 continue
             fuseau = ZoneInfo(cible.timezone_name or settings.timezone)

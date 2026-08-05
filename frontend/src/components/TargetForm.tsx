@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { Account, Target, TargetInput } from '../types'
+import { ChoixCadence } from './ChoixCadence'
 
 interface Props {
   cible: Target | null // null = création
@@ -15,6 +16,7 @@ const VIDE: TargetInput = {
   enabled: true,
   run_time: '09:00',
   cron_expression: null,
+  interval_minutes: null,
   locale: 'fr-FR',
   wait_until: 'load',
   wait_after_load_ms: 4000,
@@ -25,7 +27,7 @@ const VIDE: TargetInput = {
 // L'API refuse tout champ inconnu (extra="forbid") : on n'envoie que ceux-ci,
 // jamais les champs calcules (id, next_run_at, last_run...).
 const CHAMPS_ENVOYES = [
-  'name', 'url', 'enabled', 'run_time', 'cron_expression', 'timezone_name',
+  'name', 'url', 'enabled', 'run_time', 'cron_expression', 'interval_minutes', 'timezone_name',
   'viewport_width', 'viewport_height', 'full_page', 'wait_until',
   'wait_after_load_ms', 'timeout_ms', 'user_agent', 'locale',
   'hide_selectors', 'dismiss_selectors', 'session_profile', 'account_id',
@@ -56,8 +58,8 @@ export function TargetForm({ cible, canDelete, onClose, onSaved }: Props) {
   const [form, setForm] = useState<TargetInput>(cible ?? VIDE)
   const [erreur, setErreur] = useState<string | null>(null)
   const [envoi, setEnvoi] = useState(false)
-  const [cadence, setCadence] = useState<'quotidien' | 'cron'>(
-    cible?.cron_expression ? 'cron' : 'quotidien',
+  const [cadence, setCadence] = useState<'quotidien' | 'intervalle' | 'cron'>(
+    cible?.interval_minutes ? 'intervalle' : cible?.cron_expression ? 'cron' : 'quotidien',
   )
   const [confirmeSuppression, setConfirmeSuppression] = useState(false)
   const [comptes, setComptes] = useState<Account[]>([])
@@ -90,14 +92,21 @@ export function TargetForm({ cible, canDelete, onClose, onSaved }: Props) {
 
   const set = (champs: TargetInput) => setForm((f) => ({ ...f, ...champs }))
 
+  // Valeur de repli quand la cible n'a pas encore d'intervalle : le curseur
+  // demarre a 30 min, et c'est cette valeur qui part a l'enregistrement.
+  const minutes = Number(form.interval_minutes) > 0 ? Number(form.interval_minutes) : 30
+
   async function enregistrer(e: React.FormEvent) {
     e.preventDefault()
     setEnvoi(true)
     setErreur(null)
+    // Les trois cadences s'excluent : on annule les deux autres, sinon la
+    // priorite du backend (intervalle > cron > heure) garderait l'ancienne.
     const charge = chargeUtile({
       ...form,
       run_time: cadence === 'quotidien' ? form.run_time || '09:00' : null,
       cron_expression: cadence === 'cron' ? form.cron_expression || null : null,
+      interval_minutes: cadence === 'intervalle' ? minutes : null,
     })
     try {
       if (cible) await api.updateTarget(cible.id, charge)
@@ -158,50 +167,17 @@ export function TargetForm({ cible, canDelete, onClose, onSaved }: Props) {
             />
           </div>
 
-          <div className="field">
-            <label>Cadence</label>
-            <div className="btn-row" style={{ marginBottom: 8 }}>
-              <button
-                type="button"
-                className={`btn sm ${cadence === 'quotidien' ? '' : 'ghost'}`}
-                onClick={() => setCadence('quotidien')}
-              >
-                Tous les jours
-              </button>
-              <button
-                type="button"
-                className={`btn sm ${cadence === 'cron' ? '' : 'ghost'}`}
-                onClick={() => setCadence('cron')}
-              >
-                Expression cron
-              </button>
-            </div>
-            {cadence === 'quotidien' ? (
-              <>
-                <input
-                  type="time"
-                  value={form.run_time ?? '09:00'}
-                  onChange={(e) => set({ run_time: e.target.value })}
-                  required
-                />
-                <span className="hint">Heure locale du serveur.</span>
-              </>
-            ) : (
-              <>
-                <input
-                  type="text"
-                  className="mono"
-                  value={form.cron_expression ?? ''}
-                  onChange={(e) => set({ cron_expression: e.target.value })}
-                  placeholder="30 8 * * 1"
-                  required
-                />
-                <span className="hint">
-                  Cinq champs : minute, heure, jour, mois, jour de semaine. Ici : lundi à 8 h 30.
-                </span>
-              </>
-            )}
-          </div>
+          <ChoixCadence
+            mode={cadence}
+            onMode={setCadence}
+            runTime={form.run_time ?? null}
+            cronExpression={form.cron_expression ?? null}
+            intervalMinutes={form.interval_minutes ?? null}
+            onChange={set}
+            targetId={cible?.id ?? null}
+            nomCible={form.name}
+            timezone={form.timezone_name ?? null}
+          />
 
           <div className="field check">
             <input

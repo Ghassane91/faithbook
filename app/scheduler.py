@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from app.config import settings
@@ -31,8 +32,14 @@ def job_id_for(target_id: int) -> str:
     return f"{JOB_PREFIX}{target_id}"
 
 
-def build_trigger(target: Target) -> CronTrigger:
+def build_trigger(target: Target) -> CronTrigger | IntervalTrigger:
     tz = ZoneInfo(target.timezone_name or settings.timezone)
+    if target.interval_minutes:
+        # Volontairement un IntervalTrigger et non un cron "*/N" : ce dernier ne
+        # tombe juste que si N divise 60. Avec "*/45", cron declenche a :00 et
+        # :45 puis saute a l heure suivante — soit 15 min d ecart, pas 45. Et
+        # au-dela de 59 il ne veut plus rien dire.
+        return IntervalTrigger(minutes=target.interval_minutes, timezone=tz)
     if target.cron_expression:
         return CronTrigger.from_crontab(target.cron_expression, timezone=tz)
     hour, minute = target.run_time.split(":")
@@ -53,7 +60,9 @@ def schedule_target(target: Target) -> None:
     if scheduler.get_job(jid):
         scheduler.remove_job(jid)
 
-    if not target.enabled or not (target.run_time or target.cron_expression):
+    if not target.enabled or not (
+        target.run_time or target.cron_expression or target.interval_minutes
+    ):
         logger.info("Cible %s non planifiee (desactivee ou sans horaire)", target.id)
         return
 

@@ -294,9 +294,11 @@ class Target(Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    # Planification : soit une heure quotidienne HH:MM, soit une expression cron.
+    # Planification, par ordre de priorite decroissante : intervalle en minutes,
+    # expression cron, puis heure quotidienne HH:MM. Une seule des trois sert.
     run_time: Mapped[str | None] = mapped_column(String(5))
     cron_expression: Mapped[str | None] = mapped_column(String(120))
+    interval_minutes: Mapped[int | None] = mapped_column(Integer)
     timezone_name: Mapped[str | None] = mapped_column(String(64))
 
     # Options de capture (NULL => valeur par defaut globale)

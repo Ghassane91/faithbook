@@ -166,9 +166,12 @@ def update_target(
     for field, value in changes.items():
         setattr(target, field, value)
 
-    if target.enabled and not (target.run_time or target.cron_expression):
+    if target.enabled and not (
+        target.run_time or target.cron_expression or target.interval_minutes
+    ):
         raise HTTPException(
-            status_code=422, detail="Une cible active doit avoir run_time ou cron_expression"
+            status_code=422,
+            detail="Une cible active doit avoir run_time, cron_expression ou interval_minutes",
         )
 
     session.commit()
@@ -394,3 +397,41 @@ def duplicate_target(
     session.commit()
     session.refresh(copie)
     return _to_out(session, copie)
+
+
+# Import place ici volontairement : il ne sert qu'a la route ci-dessous,
+# ajoutee apres coup. A remonter avec les autres si tu reorganises le fichier.
+from pydantic import BaseModel
+
+from app.services.cadence_preview import apercu_cadence
+
+
+class ApercuCadenceIn(BaseModel):
+    target_id: int | None = None
+    run_time: str | None = None
+    cron_expression: str | None = None
+    interval_minutes: int | None = None
+    timezone_name: str | None = None
+
+
+@router.post("/preview-cadence", summary="Apercu d'une cadence, sans rien enregistrer")
+def preview_cadence(
+    payload: ApercuCadenceIn,
+    context: tenancy.OrganizationContext = Depends(organization_member),
+    session: Session = Depends(get_session),
+):
+    # La cible n'est lue que pour son poids moyen de capture. On verifie
+    # quand meme l'appartenance : sans ce controle, un identifiant devine
+    # revelerait le volume de captures d'une autre organisation.
+    cible_id = None
+    if payload.target_id:
+        cible_id = _owned_target(session, payload.target_id, context).id
+
+    return apercu_cadence(
+        session,
+        target_id=cible_id,
+        run_time=payload.run_time,
+        cron_expression=payload.cron_expression,
+        interval_minutes=payload.interval_minutes,
+        timezone_name=payload.timezone_name,
+    )

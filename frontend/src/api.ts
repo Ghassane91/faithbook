@@ -78,6 +78,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Apercu d'une cadence : calcule par le backend avec le vrai declencheur
+  // APScheduler. Le navigateur ne saurait reproduire ni cron ni le fuseau,
+  // et un apercu approximatif mentirait.
+  previewCadence: (payload: {
+    target_id?: number | null
+    run_time?: string | null
+    cron_expression?: string | null
+    interval_minutes?: number | null
+    timezone_name?: string | null
+  }) =>
+    request<{
+      next_runs: string[]
+      per_day: number
+      per_week: number
+      avg_bytes: number | null
+      bytes_per_day: number | null
+      bytes_per_month: number | null
+      error: string | null
+    }>('/targets/preview-cadence', { method: 'POST', body: JSON.stringify(payload) }),
   login: (email: string, password: string) =>
     request<User>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),

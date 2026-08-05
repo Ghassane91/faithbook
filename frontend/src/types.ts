@@ -50,6 +50,7 @@ export interface Target {
   enabled: boolean
   run_time: string | null
   cron_expression: string | null
+  interval_minutes: number | null
   timezone_name: string | null
   viewport_width: number | null
   viewport_height: number | null

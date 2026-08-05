@@ -1,5 +1,5 @@
 import { api } from '../api'
-import { aujourdhui, delai, duree, heure, resumeErreur, STATUS_LABEL, useData } from '../lib'
+import { aujourdhui, cadence, delai, duree, heure, resumeErreur, STATUS_LABEL, useData } from '../lib'
 import type { RunSummary } from '../types'
 
 interface Props {
@@ -125,7 +125,7 @@ export function Planche({ onOuvrirRun, onAllerCibles }: Props) {
             </div>
             <div className="frame-gutter">
               <span className="frame-time" style={{ color: 'var(--ink-faint)' }}>
-                {c.run_time ?? c.cron_expression ?? '—'}
+                {cadence(c)}
               </span>
               <span className="tag skipped">à venir</span>
             </div>

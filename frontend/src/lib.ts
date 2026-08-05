@@ -1,5 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { RunStatus } from './types'
+import type { RunStatus, Target } from './types'
+
+/** 45 -> "45 min", 60 -> "heure", 150 -> "2 h 30". Se lit apres "toutes les". */
+export function libelleDuree(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const h = Math.floor(minutes / 60)
+  const reste = minutes % 60
+  if (reste) return `${h} h ${reste}`
+  return h === 1 ? 'heure' : `${h} h`
+}
+
+/** Planification d'une cible en une ligne, pour les listes. */
+export function cadence(
+  c: Pick<Target, 'run_time' | 'cron_expression' | 'interval_minutes'>,
+): string {
+  if (c.interval_minutes) return `toutes les ${libelleDuree(c.interval_minutes)}`
+  return c.run_time ?? c.cron_expression ?? '—'
+}
 
 export const STATUS_LABEL: Record<RunStatus, string> = {
   pending: 'en attente',
@@ -130,10 +147,10 @@ export function useData<T>(
 
 /** Routeur minimal sur le hash : evite une dependance pour trois vues. */
 export function useRoute(): [string, (r: string) => void] {
-  const ROUTES = ['planche', 'cibles', 'comptes', 'historique', 'organisation', 'mentions']
+  const ROUTES = ['accueil', 'planche', 'cibles', 'comptes', 'historique', 'organisation', 'mentions']
   const lire = () => {
     const r = window.location.hash.replace(/^#\/?/, '')
-    return ROUTES.includes(r) ? r : 'planche'
+    return ROUTES.includes(r) ? r : 'accueil'
   }
   const [route, setRoute] = useState(lire)
   useEffect(() => {
