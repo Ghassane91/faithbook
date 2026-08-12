@@ -490,7 +490,7 @@ async def _attempt_once(
             )
 
     # --- 3. Envoi vers Google Drive (optionnel) --------------------------
-    if settings.storage_backend != "google_drive":
+    if settings.storage_backend not in ("google_drive", "s3"):
         log_step(
             session,
             run,
