@@ -13,7 +13,7 @@ export DISPLAY=:99
 # nettoie les verrous residuels avant de lancer l ecran virtuel.
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
 
-Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+Xvfb :99 -screen 0 ${XVFB_SCREEN:-1920x1080x24} -nolisten tcp >/tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 
 port_listening() {

@@ -1,0 +1,14 @@
+services:
+  frontend:
+    networks: [default, integrit]
+  # init: true insere un vrai PID 1 (tini) qui recolte les processus
+  # orphelins. Sans lui, chaque Chromium detache par Playwright finit en
+  # zombie definitif : 108 accumules en trois jours, avec UNE capture par
+  # jour. Indispensable avant toute montee en charge.
+  backend:
+    init: true
+  worker:
+    init: true
+networks:
+  integrit:
+    external: true
