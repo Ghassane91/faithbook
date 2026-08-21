@@ -67,7 +67,7 @@ def site_label(url: str) -> str:
 
 def build_filename(target: Target, capture_date: str, stamp: str) -> str:
     # Nom reconnaissable : <site>_<date>_<heure>.png
-    return f"{site_label(target.url)}_{capture_date}_{stamp}.png"
+    return f"{site_label(target.url)}_{capture_date}_{stamp}.jpg"
 
 
 def organization_folder(target: Target) -> str:
@@ -462,7 +462,7 @@ async def capture_stitched_page(
                 await page.wait_for_timeout(delay)
 
         if not tiles:
-            await page.screenshot(path=str(destination), full_page=True)
+            await page.screenshot(path=str(destination), full_page=True, type="jpeg", quality=75)
             return steps, previous_height
 
         total_height = sum(tile.height for tile in tiles)
@@ -472,7 +472,7 @@ async def capture_stitched_page(
             stitched.paste(tile, (0, offset))
             offset += tile.height
             tile.close()
-        stitched.save(destination, "PNG", optimize=False, compress_level=6)
+        stitched.save(destination, "JPEG", quality=75, optimize=True, progressive=True)
         stitched.close()
         image.close()
         return steps, round(total_height / pixel_scale_y)
@@ -716,7 +716,7 @@ async def _capture_page_impl(
             except Exception:  # noqa: BLE001
                 metrics = None
             if not screenshot_written:
-                await page.screenshot(path=str(destination), full_page=target.full_page)
+                await page.screenshot(path=str(destination), full_page=target.full_page, type="jpeg", quality=75)
             guard.raise_if_blocked()
         finally:
             if account_profile_slug:
