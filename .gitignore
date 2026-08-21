@@ -40,3 +40,11 @@ comparaison_run*.png
 /FaithBook-frontend-editorial.zip
 /backup/
 /faithbook/
+
+# sauvegardes automatiques des scripts de maintenance
+*.bak
+*.bak-*
+
+# sorties du validateur de cibles
+cibles-validees.csv
+cibles-rejetees.csv
