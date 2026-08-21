@@ -254,3 +254,27 @@ def get_run_remote_link(
             "expire_dans_secondes": settings.s3_signed_url_ttl_seconds,
         }
     return {"url": run.drive_file_link, "expire_dans_secondes": None}
+
+
+@router.get("/planche/{capture_date}.pdf", summary="Planche du jour en PDF")
+async def planche_du_jour(
+    capture_date: str,
+    context: tenancy.OrganizationContext = Depends(current_organization),
+    session: Session = Depends(get_session),
+):
+    """Genere la planche du jour et la renvoie.
+
+    Le document est aussi ecrit sur le disque, et depose sur le stockage
+    distant s'il est configure : telecharger et archiver sont le meme geste.
+    On ne peut pas obtenir l'un sans l'autre, donc on ne peut pas croire
+    qu'une planche est archivee alors qu'elle a seulement ete affichee.
+    """
+    from app.services import planche as planche_service
+
+    fichier = await planche_service.exporter(
+        session,
+        capture_date,
+        context.organization.id,
+        getattr(context.organization, "name", ""),
+    )
+    return FileResponse(fichier, media_type="application/pdf", filename=fichier.name)
