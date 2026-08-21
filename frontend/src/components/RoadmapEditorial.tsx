@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 interface FonctionRoadmap {
   numero: string
@@ -156,25 +156,36 @@ interface RoadmapProps {
 }
 
 export function RoadmapEditorial({ variante, id }: RoadmapProps) {
+  // Une seule fonction ouverte a la fois : c est ce qui garde la page courte.
+  const [ouverte, setOuverte] = useState<string | null>(null)
+
   return (
     <div id={id} className={`${variante}-roadmap editorial-roadmap`}>
       {FONCTIONS.map((fonction) => (
-        <section
+        <details
           key={fonction.numero}
+          open={ouverte === fonction.numero}
+          onToggle={(e) => {
+            if (e.currentTarget.open) setOuverte(fonction.numero)
+            else if (ouverte === fonction.numero) setOuverte(null)
+          }}
           className={`${variante}-feature editorial-feature ${fonction.couleur}`}
-          aria-labelledby={`${variante}-fonction-${fonction.numero}`}
         >
-          <span
-            className={`${variante}-feature-number editorial-feature-number`}
-            aria-hidden="true"
-          >
-            {fonction.numero}
-          </span>
+          <summary className={`${variante}-feature-tete editorial-feature-tete`}>
+            <span
+              className={`${variante}-feature-number editorial-feature-number`}
+              aria-hidden="true"
+            >
+              {fonction.numero}
+            </span>
+            <span className="editorial-feature-intitule">
+              <span className={`${variante}-section-label editorial-section-label`}>
+                Fonction {fonction.numero}
+              </span>
+              <h2 id={`${variante}-fonction-${fonction.numero}`}>{fonction.titre}</h2>
+            </span>
+          </summary>
           <div className={`${variante}-feature-body editorial-feature-body`}>
-            <p className={`${variante}-section-label editorial-section-label`}>
-              Fonction {fonction.numero}
-            </p>
-            <h2 id={`${variante}-fonction-${fonction.numero}`}>{fonction.titre}</h2>
             <p>{fonction.texte}</p>
             <p>{fonction.complement}</p>
             <div className={`${variante}-example editorial-example`}>
@@ -187,7 +198,7 @@ export function RoadmapEditorial({ variante, id }: RoadmapProps) {
               <div><dt>Donnée</dt><dd>{fonction.donnee}</dd></div>
             </dl>
           </div>
-        </section>
+        </details>
       ))}
     </div>
   )
