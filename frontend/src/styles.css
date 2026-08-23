@@ -4117,3 +4117,18 @@ h1 {
 .rail .brand-mark{ cursor: pointer; }
 .rail .brand-mark:hover{ color: var(--cyan); }
 .rail .brand-mark:focus-visible{ outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+/* En-tete du tiroir toujours visible.
+   Une capture pleine page atteint 19 000 px de haut dans ce tiroir. Sans
+   en-tete colle, le bouton Fermer disparait des le premier ecran et il ne
+   reste aucune sortie visible pendant tout le reste du defilement. */
+.drawer-head{
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--ground);
+  margin-inline: calc(-1 * clamp(26px, 4vw, 52px));
+  padding: 10px clamp(26px, 4vw, 52px) 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.drawer-head .btn{ flex: none; }
