@@ -4111,3 +4111,9 @@ h1 {
    « FAITHBOOK / FEUILLE DE ROUTE / AOUT 2026 ». Pour la remettre,
    supprimer ce bloc et reconstruire. */
 .landing-kicker{ display: none; }
+
+/* Marque cliquable : revenir a l accueil en cliquant sur le logo est le
+   geste le plus universel, il ne doit pas tomber dans le vide. */
+.rail .brand-mark{ cursor: pointer; }
+.rail .brand-mark:hover{ color: var(--cyan); }
+.rail .brand-mark:focus-visible{ outline: 2px solid var(--cyan); outline-offset: 3px; }

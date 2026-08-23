@@ -145,7 +145,21 @@ function AppConnecte() {
     <div className="shell app-workspace">
       <nav className="rail">
         <div className="brand">
-          <span className="brand-mark">FaithBook</span>
+          <span
+            className="brand-mark"
+            role="button"
+            tabIndex={0}
+            title="Revenir a l'accueil"
+            onClick={() => aller('accueil')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                aller('accueil')
+              }
+            }}
+          >
+            FaithBook
+          </span>
           <span className="brand-sub">veille visuelle</span>
           <span className="brand-registration" aria-hidden="true">
             <i />
