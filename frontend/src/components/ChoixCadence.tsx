@@ -144,6 +144,7 @@ export function ChoixCadence({
   timezone,
 }: Props) {
   const [cronAvance, setCronAvance] = useState(false)
+  const [personnalise, setPersonnalise] = useState(false)
   const [apercu, setApercu] = useState<Apercu | null>(null)
 
   const minutes = intervalMinutes && intervalMinutes > 0 ? intervalMinutes : 30
@@ -228,6 +229,30 @@ export function ChoixCadence({
     onChange({ cron_expression: ecrireCron(heure, suivants) })
   }
 
+
+  // Quel raccourci decrit le reglage courant ? Une cible reglee finement
+  // retombe sur « perso », ce qui ouvre le panneau detaille toute seule :
+  // aucun reglage existant n'est reinterprete.
+  const valeurPreset = (() => {
+    if (personnalise) return 'perso'
+    if (mode === 'quotidien') return heureQuotidienne === '08:00' ? 'jour' : 'perso'
+    if (mode === 'intervalle') {
+      if (minutes === 60) return 'heure'
+      if (minutes === 720) return 'matin-soir'
+      if (minutes === 15) return 'rapproche'
+      return 'perso'
+    }
+    if (
+      cronLu &&
+      cronLu.heure === '09:00' &&
+      cronLu.jours.length === 5 &&
+      [0, 1, 2, 3, 4].every((j) => cronLu.jours.includes(j))
+    ) {
+      return 'ouvres'
+    }
+    return 'perso'
+  })()
+
   const phrase = (() => {
     const cible = nomCible?.trim() ? `« ${nomCible.trim()} »` : 'cette page'
     if (mode === 'quotidien') return `photographiera ${cible} tous les jours à ${heureQuotidienne}`
@@ -240,6 +265,35 @@ export function ChoixCadence({
     <div className="field cadence">
       <label>Cadence</label>
 
+        {/* 1. Une seule question. Tout le detail vit sous « Personnalise ». */}
+        <select
+          className="cadence-preset"
+          value={valeurPreset}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === 'perso') {
+              setPersonnalise(true)
+              return
+            }
+            setPersonnalise(false)
+            if (v === 'ouvres') {
+              onMode('cron')
+              onChange({ cron_expression: ecrireCron('09:00', [0, 1, 2, 3, 4]) })
+            } else {
+              intention(v)
+            }
+          }}
+        >
+          <option value="jour">Tous les jours a 08:00</option>
+          <option value="ouvres">Du lundi au vendredi a 09:00</option>
+          <option value="matin-soir">Matin et soir</option>
+          <option value="heure">Toutes les heures</option>
+          <option value="rapproche">Surveillance rapprochee — toutes les 15 min</option>
+          <option value="perso">Personnalise…</option>
+        </select>
+
+        {valeurPreset === 'perso' && (
+          <>
       {/* 1. L'intention, avant le reglage. */}
       <div className="cadence-intentions">
         <button type="button" className="btn sm ghost" onClick={() => intention('jour')}>
@@ -371,6 +425,8 @@ export function ChoixCadence({
         </div>
       )}
 
+          </>
+        )}
       {/* 3. Ce que ce reglage produit, en clair. */}
       <div className="cadence-consequences">
         <p className="cadence-phrase">

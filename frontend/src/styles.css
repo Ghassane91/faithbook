@@ -4132,3 +4132,19 @@ h1 {
   border-bottom: 1px solid var(--rule);
 }
 .drawer-head .btn{ flex: none; }
+
+/* Selecteur de cadence replie : une seule question visible, le detail
+   sous « Personnalise ». */
+.cadence-preset{
+  font: inherit;
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong, var(--rule));
+  border-radius: 3px;
+  cursor: pointer;
+}
+.cadence-preset:focus{ outline: 2px solid var(--cyan); outline-offset: 2px; }
+.field.cadence > .cadence-preset + *{ margin-top: 14px; }
