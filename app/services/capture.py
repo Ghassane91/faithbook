@@ -551,7 +551,7 @@ async def _capture_page_impl(
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    launch_args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+    launch_args = ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"]
     proxy = ssrf.playwright_proxy()
 
     work_dir: Path | None = None

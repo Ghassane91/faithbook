@@ -70,7 +70,7 @@ def check_url(url: str) -> None:
     try:
         infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
     except socket.gaierror as exc:
-        raise UrlRejected(f"Nom d'hôte introuvable : {host}") from exc
+        raise HostUnresolved(f"Nom d'hôte introuvable : {host}") from exc
 
     for info in infos:
         ip = info[4][0]
@@ -78,6 +78,10 @@ def check_url(url: str) -> None:
             raise UrlRejected(
                 f"« {host} » pointe vers une adresse interne ({ip}) : accès refusé."
             )
+
+
+class HostUnresolved(UrlRejected):
+    """Nom d'hote non resolu : injoignable, mais pas une menace SSRF."""
 
 
 def playwright_proxy() -> dict[str, str] | None:
@@ -104,6 +108,14 @@ class BrowserRequestGuard:
             return
         try:
             await asyncio.to_thread(check_url, request.url)
+        except HostUnresolved as exc:
+            if request.resource_type != "document":
+                await route.abort("blockedbyclient")
+                return
+            self.blocked = exc
+            self.blocked_url = request.url
+            await route.abort("blockedbyclient")
+            return
         except UrlRejected as exc:
             self.blocked = exc
             self.blocked_url = request.url
