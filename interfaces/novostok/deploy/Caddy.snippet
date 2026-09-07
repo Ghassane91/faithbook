@@ -1,0 +1,8 @@
+# Include inside the existing HTTPS block for FaithBook, before its proxy.
+# /srv/sites must already be mounted in Caddy.
+redir /nouvelle-interface /nouvelle-interface/ 308
+handle_path /nouvelle-interface/* {
+    root * /srv/sites/faithbook-interface
+    header Cache-Control "no-cache"
+    file_server
+}
