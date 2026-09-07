@@ -7,7 +7,16 @@
 : "${FB_SITE_DIR:=/opt/integrit/sites/faithbook-interface}"
 : "${FB_DEPLOY_ROOT:=/opt/integrit/deployments/faithbook-interface}"
 : "${FB_SRC_DIR:=/opt/integrit/src/faithbook}"
-: "${FB_CADDYFILE:=/etc/caddy/Caddyfile}"
+
+# --- Caddy ------------------------------------------------------------------
+# Sur ce serveur Caddy tourne dans un conteneur Docker, pas en service systemd.
+# auto = detection ; docker = conteneur ; systemd = service hote.
+: "${FB_CADDY_MODE:=auto}"
+: "${FB_CADDY_CONTAINER:=caddy}"
+# Chemin du Caddyfile DANS le conteneur.
+: "${FB_CADDYFILE_CONTENEUR:=/etc/caddy/Caddyfile}"
+# Chemin du Caddyfile SUR L'HOTE. Vide = deduit du montage Docker.
+: "${FB_CADDYFILE:=}"
 
 # --- Source du code ---------------------------------------------------------
 : "${FB_GIT_URL:=https://github.com/Ghassane91/faithbook.git}"

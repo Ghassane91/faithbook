@@ -148,8 +148,24 @@ else
   absent "$FB_CADDYFILE"
   printf '  Chercher : sudo find /etc -name Caddyfile 2>/dev/null\n'
 fi
+sous "Caddy en conteneur Docker ?"
+if command -v docker >/dev/null 2>&1; then
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "${FB_CADDY_CONTAINER:-caddy}"; then
+    printf '  conteneur %s en cours d execution\n' "${FB_CADDY_CONTAINER:-caddy}"
+    printf '  version : %s\n' "$(docker exec "${FB_CADDY_CONTAINER:-caddy}" caddy version 2>/dev/null | head -1)"
+    printf '  montages :\n'
+    docker inspect -f '{{range .Mounts}}    {{.Source}} -> {{.Destination}} ({{.Mode}}){{"\n"}}{{end}}' \
+      "${FB_CADDY_CONTAINER:-caddy}" 2>/dev/null
+    printf '  CHEMIN DU CADDYFILE SUR L HOTE : chercher ci-dessus la source montee sur /etc/caddy\n'
+  else
+    printf '  pas de conteneur nomme %s\n' "${FB_CADDY_CONTAINER:-caddy}"
+    docker ps --format '  {{.Names}}  {{.Image}}' 2>/dev/null | grep -i caddy || printf '  aucun conteneur caddy\n'
+  fi
+else
+  printf '  docker absent\n'
+fi
 sous "Validation de la configuration"
-command -v caddy >/dev/null 2>&1 && caddy validate --config "$FB_CADDYFILE" 2>&1 | tail -5 || absent caddy
+command -v caddy >/dev/null 2>&1 && caddy validate --config "$FB_CADDYFILE" 2>&1 | tail -5 || printf '  binaire caddy absent sur l hote (normal si Caddy tourne en conteneur)\n'
 
 titre "7. SERVICE FAITHBOOK"
 sous "Unites systemd correspondantes"
@@ -167,9 +183,13 @@ ROOTS=""
 [ -n "$PKG" ] && ROOTS="$ROOTS $(dirname "$(dirname "$(dirname "$PKG")")")"
 if [ -n "${ROOTS// /}" ]; then
   # shellcheck disable=SC2086
-  grep -rhoE "(app|router)\.(get|post|put|patch|delete)\(['\"][^'\"]+" $ROOTS \
-       --include='*.ts' --include='*.js' --include='*.tsx' 2>/dev/null \
+  grep -rhoE "@?(app|router|api_router)\.(get|post|put|patch|delete)\(['\"][^'\"]+" $ROOTS \
+       --include='*.py' --include='*.ts' --include='*.js' --include='*.tsx' 2>/dev/null \
     | sed -E "s/.*\(['\"]//" | sort -u | head -60 | sed 's/^/  /' || printf '  aucune route trouvee\n'
+  printf '\n  Prefixes de routeur :\n'
+  # shellcheck disable=SC2086
+  grep -rhoE 'prefix[[:space:]]*=[[:space:]]*"[^"]+"' $ROOTS --include='*.py' 2>/dev/null \
+    | sed -E 's/.*"(.*)"/  \1/' | sort -u | head -20 || printf '  aucun\n'
   printf '\n  Appels API cote client :\n'
   # shellcheck disable=SC2086
   grep -rhoE "['\"]/api/[A-Za-z0-9_/-]+" $ROOTS \
@@ -190,9 +210,15 @@ printf '  (aucune valeur n a ete lue)\n'
 
 titre "10. SAUVEGARDE SYSTEME"
 sous "Outils de sauvegarde installes"
+trouve=0
 for b in restic borg borgmatic duplicity rsnapshot rclone; do
-  command -v "$b" >/dev/null 2>&1 && printf '  %s present\n' "$b"
+  command -v "$b" >/dev/null 2>&1 && { printf '  %s present\n' "$b"; trouve=1; }
 done
+[ "$trouve" -eq 0 ] && printf '  AUCUN outil de sauvegarde installe sur l hote\n'
+sous "Le dossier servi est-il couvert par une sauvegarde ?"
+printf '  dossier servi      : %s\n' "$FB_SITE_DIR"
+printf '  sauvegardes deploi.: %s\n' "$FB_DEPLOY_ROOT"
+printf '  A verifier manuellement : snapshots Hetzner, ou tache de sauvegarde ailleurs.\n'
 sous "Taches planifiees"
 crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | sed 's/^/  /' || printf '  aucune crontab utilisateur\n'
 ls /etc/cron.d/ 2>/dev/null | sed 's/^/  \/etc\/cron.d\/: /'

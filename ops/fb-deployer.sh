@@ -55,8 +55,11 @@ log "horodatage           : $TS"
 
 sx mkdir -p "$BAK"
 if [ "$FB_DRY" -eq 0 ]; then
-  if [ -n "${FB_SUDO:-}" ]; then $FB_SUDO touch "$BAK/deploiement.log" && $FB_SUDO chmod 666 "$BAK/deploiement.log" 2>/dev/null || true
-  else : > "$BAK/deploiement.log"; fi
+  if [ -n "${FB_SUDO:-}" ]; then
+    $FB_SUDO touch "$BAK/deploiement.log" 2>/dev/null && $FB_SUDO chmod 666 "$BAK/deploiement.log" 2>/dev/null || true
+  else
+    : > "$BAK/deploiement.log" 2>/dev/null || true
+  fi
   [ -w "$BAK/deploiement.log" ] && FB_LOG="$BAK/deploiement.log"
 fi
 
@@ -68,8 +71,18 @@ COMMIT="non applicable"
 case "$MODE" in
   git)
     command -v git >/dev/null 2>&1 || mort "git absent"
-    command -v npm >/dev/null 2>&1 || mort "npm absent"
-    command -v node >/dev/null 2>&1 || mort "node absent"
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+      printf '\n' >&2
+      printf 'Node et npm ne sont pas installes sur ce serveur.\n' >&2
+      printf 'La construction ne peut pas y avoir lieu. Deux options :\n\n' >&2
+      printf '  1. Construire ailleurs, puis publier l archive :\n' >&2
+      printf '       cd interfaces/novostok && npm ci && npm run build:hetzner\n' >&2
+      printf '       tar -czf faithbook-hetzner.tar.gz -C dist-hetzner .\n' >&2
+      printf '       # copier l archive sur le serveur, puis :\n' >&2
+      printf '       ./fb-deployer.sh --from-archive /tmp/faithbook-hetzner.tar.gz\n\n' >&2
+      printf '  2. Installer Node %s ou plus sur le serveur.\n\n' "${FB_NODE_MIN:-22.13.0}" >&2
+      mort "construction impossible ici, rien n'a ete modifie"
+    fi
     if [ -n "${FB_NODE_MIN:-}" ]; then
       nv="$(node -v 2>/dev/null | sed 's/^v//')"
       if [ "$(printf '%s\n%s\n' "$FB_NODE_MIN" "$nv" | sort -V | head -1)" != "$FB_NODE_MIN" ]; then

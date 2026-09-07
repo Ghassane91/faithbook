@@ -44,11 +44,12 @@ lister() {
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     chemin="$FB_DEPLOY_ROOT/$d"; contenu=""; info=""
-    [ -d "$chemin/site.before" ] && contenu="site"
-    [ -f "$chemin/Caddyfile.before" ] && contenu="${contenu:+$contenu + }Caddyfile"
+    fb_test -d "$chemin/site.before" && contenu="site"
+    fb_test -f "$chemin/Caddyfile.before" && contenu="${contenu:+$contenu + }Caddyfile"
     [ -z "$contenu" ] && contenu="vide"
-    if [ -f "$chemin/manifeste.json" ]; then
-      info="$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[^"]*"' "$chemin/manifeste.json" 2>/dev/null | cut -d'"' -f4 | cut -c1-12)"
+    if fb_test -f "$chemin/manifeste.json"; then
+      info="$( { cat "$chemin/manifeste.json" 2>/dev/null || ${FB_SUDO:-} cat "$chemin/manifeste.json" 2>/dev/null; } \
+              | grep -o '"commit"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 | cut -c1-12)"
     fi
     case "$info" in ''|non*) info="—" ;; esac
     printf '  %-26s  %-22s  %s\n' "$d" "$contenu" "$info"
@@ -71,14 +72,14 @@ if [ "$CIBLE" = "__derniere__" ]; then
 fi
 
 SRC="$FB_DEPLOY_ROOT/$CIBLE"
-[ -d "$SRC" ] || { echo "Sauvegarde introuvable : $CIBLE"; echo; lister; exit 1; }
-[ -d "$SRC/site.before" ] || mort "cette sauvegarde ne contient pas de site.before : $SRC"
-[ -f "$SRC/site.before/index.html" ] || mort "site.before sans index.html, restauration refusee"
+fb_test -d "$SRC" || { echo "Sauvegarde introuvable : $CIBLE"; echo; lister; exit 1; }
+fb_test -d "$SRC/site.before" || mort "cette sauvegarde ne contient pas de site.before : $SRC"
+fb_test -f "$SRC/site.before/index.html" || mort "site.before sans index.html, restauration refusee"
 
 printf '\nRestauration FaithBook\n'
 printf '  sauvegarde  : %s\n' "$SRC/site.before"
 printf '  vers        : %s\n' "$FB_SITE_DIR"
-printf '  fichiers    : %s\n' "$(find "$SRC/site.before" -type f | wc -l)"
+printf '  fichiers    : %s\n' "$( { find "$SRC/site.before" -type f 2>/dev/null || ${FB_SUDO:-} find "$SRC/site.before" -type f 2>/dev/null; } | wc -l)"
 [ "$CADDY" -eq 1 ] && printf '  Caddyfile   : oui\n'
 [ "$FB_DRY" -eq 1 ] && printf '  execution   : a blanc\n'
 printf '\n'
@@ -106,16 +107,16 @@ log "site restaure depuis : $CIBLE"
 if [ "$CADDY" -eq 1 ]; then
   etape "3. Restauration du Caddyfile"
   [ -f "$SRC/Caddyfile.before" ] || mort "aucun Caddyfile.before dans cette sauvegarde"
-  if [ "$FB_DRY" -eq 0 ] && command -v caddy >/dev/null 2>&1; then
-    sx caddy validate --config "$SRC/Caddyfile.before" >/dev/null \
-      || mort "le Caddyfile sauvegarde est invalide, remplacement annule"
-    log "Caddyfile valide"
-  else
-    log "binaire caddy absent ou mode a blanc, validation ignoree"
+  log "utiliser plutot fb-caddy.sh --restaurer pour la configuration Caddy"
+  if [ "$FB_DRY" -eq 0 ]; then
+    fb_caddy_detect || mort "Caddy non detecte, restauration de la configuration impossible"
+    rc=0; fb_caddy_valider "$SRC/Caddyfile.before" || rc=$?
+    [ "$rc" -eq 1 ] && mort "le Caddyfile sauvegarde est invalide, remplacement annule"
+    [ "$rc" -eq 2 ] && log "validation impossible, remplacement poursuivi"
+    sx cp -a "$SRC/Caddyfile.before" "$FB_CADDYFILE"
+    fb_caddy_recharger || mort "rechargement de Caddy en echec"
+    log "Caddy recharge"
   fi
-  sx cp -a "$SRC/Caddyfile.before" "$FB_CADDYFILE"
-  sx systemctl reload caddy || mort "rechargement de Caddy en echec, verifier : journalctl -u caddy -n 50"
-  log "Caddy recharge"
 fi
 
 # 4. Verification.

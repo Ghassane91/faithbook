@@ -43,16 +43,61 @@ Lues dans le dépôt le 7 septembre 2026, commit `f169523`. Elles ne sont plus d
 
 `fb-deployer.sh` contrôle la version de Node avant de construire et s'arrête si elle est inférieure au minimum.
 
-### Restent à confirmer sur le serveur
+## 2 bis. État réel du serveur
 
-| Élément | Pourquoi |
-|---|---|
-| `FB_CADDYFILE` | `/etc/caddy/Caddyfile` est le chemin standard, non vérifié sur cette machine |
-| Port du `reverse_proxy` FaithBook | nécessaire pour tout changement de routage |
-| Node installé sur le serveur | si absent, construire ailleurs et utiliser `--from-archive` |
-| Périmètre de la sauvegarde existante | le dossier servi y est-il inclus ? |
+Relevé le 7 septembre 2026 à 18:49 UTC par `fb-inventaire.sh` sur `ubuntu-4gb-hel1-1`. Trois constats changent la façon d'utiliser ces scripts.
 
-`./fb-inventaire.sh` répond à ces quatre points en une commande. Il ne modifie rien.
+### Tout tourne dans Docker
+
+| Conteneur | Image | Exposition |
+|---|---|---|
+| `caddy` | `caddy:2-alpine` | 80, 443, 8081–8090 |
+| `faithbook-frontend` | `faithbook-frontend` | `127.0.0.1:3000` → 80 |
+| `faithbook-backend` | `facebook-backend` | 8000 interne |
+| `faithbook-worker` | `facebook-backend` | interne |
+| `faithbook-db` | `postgres:17-alpine` | 5432 interne |
+| `faithbook-redis` | `redis:7.4-alpine` | 6379 interne |
+| `faithbook-egress-proxy` | — | 3128 interne |
+| `uptime-kuma` | `louislam/uptime-kuma:1` | 3001 interne |
+
+**Conséquence :** `systemctl reload caddy` n'existe pas ici, et il n'y a pas de `/etc/caddy/Caddyfile` sur l'hôte. `fb-caddy.sh` détecte le conteneur, lit le chemin du Caddyfile dans les montages Docker, valide via une image jetable et recharge par `docker exec caddy caddy reload`.
+
+**Conséquence pour le routage :** Caddy étant dans un conteneur, sa cible de `reverse_proxy` n'est pas `127.0.0.1:3000` mais le nom du service sur le réseau Docker. Reprendre la cible exacte du bloc existant, jamais l'inventer.
+
+### Node et npm ne sont pas installés
+
+Le mode git de `fb-deployer.sh` ne peut donc pas construire sur ce serveur. Il refuse maintenant explicitement et affiche la marche à suivre. La voie normale est :
+
+```bash
+# Sur un poste avec Node 22.13+
+cd interfaces/novostok
+npm ci && npm run build:hetzner
+tar -czf faithbook-hetzner.tar.gz -C dist-hetzner .
+
+# Copier l'archive sur le serveur, puis :
+cd /opt/integrit/ops
+./fb-deployer.sh --from-archive /tmp/faithbook-hetzner.tar.gz --dry-run
+./fb-deployer.sh --from-archive /tmp/faithbook-hetzner.tar.gz
+```
+
+### Aucune sauvegarde visible
+
+Aucun outil de sauvegarde installé (`restic`, `borg`, `borgmatic`, `duplicity`, `rsnapshot`, `rclone` : tous absents). Aucune crontab utilisateur. Aucun timer systemd de sauvegarde — seulement les timers système d'Ubuntu.
+
+Le compte rendu du 7 septembre mentionne des « sauvegardes testées ». Elles ne sont pas visibles sur cette machine. Deux possibilités : des snapshots pris côté Hetzner, hors du système, ou une sauvegarde qui n'existe plus. **À trancher avant toute livraison.** Sans sauvegarde, `/opt/integrit/deployments` est le seul filet, et il est sur le même disque.
+
+### Autres constats
+
+- Ubuntu 26.04, noyau 7.0.0-30. **23 paquets à mettre à jour et un redémarrage en attente.**
+- Mémoire : 3,7 Gio dont 1,8 utilisés, plus 1,2 Gio de swap consommé. Marge étroite pour une construction locale, argument de plus pour construire ailleurs.
+- Disque : 30 Gio utilisés sur 75, soit 41 %.
+- Certificat Let's Encrypt valide jusqu'au 12 novembre 2026.
+- `/opt/integrit/sites/faithbook-interface` et `/opt/integrit/deployments/...` appartiennent à `root`. Les scripts passent par `sudo` automatiquement, lecture comprise.
+- Contrôles HTTP au moment du relevé : `/nouvelle-interface/` en 200, chemin sans barre finale en 308, application historique en 200.
+
+### Reste une inconnue
+
+Le chemin du Caddyfile sur l'hôte. La version corrigée de `fb-inventaire.sh` affiche les montages du conteneur `caddy` et le donne directement.
 
 ## 3. Installation sur le serveur, une seule fois
 
@@ -181,7 +226,21 @@ Contrôles effectués :
 
 ## 7. Supervision
 
-Le script renvoie 0 ou 1, il se branche donc directement sur un ordonnanceur.
+**Uptime Kuma tourne déjà sur ce serveur** (conteneur `uptime-kuma`, port 3001). C'est la voie la plus simple : y ajouter trois moniteurs HTTP plutôt qu'un timer systemd.
+
+| Moniteur | URL | Attendu |
+|---|---|---|
+| Nouvelle interface | `https://veille-novostok.duckdns.org/nouvelle-interface/` | 200 |
+| Application historique | `https://veille-novostok.duckdns.org/` | 200 |
+| API sans session | `https://veille-novostok.duckdns.org/api/auth/me` | 401 |
+
+Le troisième est le plus utile : un 200 sur cette adresse sans session signifierait une fuite de données.
+
+Uptime Kuma surveille aussi l'expiration du certificat.
+
+### Variante : timer systemd
+
+Si vous préférez faire tourner le vérificateur complet, qui contrôle en plus chaque fichier JS et CSS référencé par l'index :
 
 ```bash
 sudo tee /etc/systemd/system/faithbook-verif.service >/dev/null <<'UNIT'

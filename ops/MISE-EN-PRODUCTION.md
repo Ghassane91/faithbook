@@ -2,13 +2,15 @@
 
 Ce document traite les quatre points qui restaient ouverts après la procédure de déploiement : l'inventaire préalable, le nom de domaine, la bascule, et le périmètre fonctionnel.
 
-Le code du dépôt a été lu le 7 septembre 2026 (commit `f169523`). Les points techniques ci-dessous sont vérifiés, pas supposés. Ce qui reste inconnu concerne le serveur lui-même : le Caddyfile réel et le port du service FaithBook. **L'étape 1 les lève.**
+Le code du dépôt et l'état du serveur ont été relevés le 7 septembre 2026. Les points techniques ci-dessous sont vérifiés, pas supposés. Une seule inconnue subsiste : le chemin du Caddyfile sur l'hôte, que la version corrigée de `fb-inventaire.sh` donne directement.
+
+**Caddy tourne dans un conteneur Docker sur ce serveur.** Tous les blocs de configuration ci-dessous doivent donc reprendre la cible `reverse_proxy` du bloc existant — un nom de service sur le réseau Docker, pas `127.0.0.1:3000`. Ne jamais l'inventer.
 
 ---
 
 ## Étape 1 — Inventaire préalable
 
-La lecture du dépôt a réglé la commande de construction, le dossier de sortie, les routes API et l'accessibilité du dépôt. Restent quatre inconnues, toutes côté serveur : le Caddyfile réel, le port du service FaithBook, la présence de Node 22.13+, et le périmètre de la sauvegarde existante. `fb-inventaire.sh` les lève en une commande.
+Premier passage effectué le 7 septembre à 18:49 UTC. Il a établi que Caddy et FaithBook tournent dans Docker, que Node n'est pas installé, et qu'aucun outil de sauvegarde n'est présent. Relancer la version corrigée pour obtenir le chemin du Caddyfile :
 
 ```bash
 ssh -p 2222 ghassane@62.238.108.19
@@ -71,7 +73,7 @@ dig +short veille.novostok.com
 # doit renvoyer 62.238.108.19
 ```
 
-**2. Caddy.** Ajouter un bloc pour le nouveau nom. Caddy obtient le certificat Let's Encrypt automatiquement, à condition que le DNS pointe déjà correctement et que les ports 80 et 443 soient ouverts.
+**2. Caddy.** Ajouter un bloc pour le nouveau nom. Caddy obtient le certificat Let's Encrypt automatiquement, à condition que le DNS pointe déjà correctement et que les ports 80 et 443 soient ouverts — ils le sont, publiés par le conteneur `caddy`.
 
 ```caddyfile
 # Nouveau nom, configuration identique a l'ancien bloc.
@@ -85,8 +87,10 @@ veille.novostok.com {
 		file_server
 	}
 
-	# Application FaithBook historique
-	reverse_proxy 127.0.0.1:PORT_A_CONFIRMER
+	# Application FaithBook historique.
+	# REPRENDRE LA CIBLE EXACTE du bloc existant : Caddy etant en conteneur,
+	# c'est un nom de service Docker, pas 127.0.0.1.
+	reverse_proxy CIBLE_DU_BLOC_EXISTANT
 }
 
 # L'ancien nom redirige, le temps que les signets suivent.
@@ -171,12 +175,12 @@ veille.novostok.com {
 	encode zstd gzip
 
 	handle_path /complet* {
-		reverse_proxy 127.0.0.1:PORT
+		reverse_proxy CIBLE_DU_BLOC_EXISTANT
 	}
 
 	# L'API reste a la meme origine, sous /api/
 	handle /api/* {
-		reverse_proxy 127.0.0.1:PORT
+		reverse_proxy CIBLE_DU_BLOC_EXISTANT
 	}
 
 	handle {
@@ -200,7 +204,7 @@ https://app.novostok.com/            application historique, inchangee
 veille.novostok.com {
 	encode zstd gzip
 	handle /api/* {
-		reverse_proxy 127.0.0.1:PORT
+		reverse_proxy CIBLE_DU_BLOC_EXISTANT
 	}
 	handle {
 		root * /srv/sites/faithbook-interface
@@ -210,7 +214,7 @@ veille.novostok.com {
 }
 
 app.novostok.com {
-	reverse_proxy 127.0.0.1:PORT
+	reverse_proxy CIBLE_DU_BLOC_EXISTANT
 }
 ```
 
@@ -283,8 +287,9 @@ Coût : intermédiaire. C'est le meilleur rapport entre l'effort et le confort d
 | 7 | Décider : cookie sur le domaine parent, ou deux sessions | si scénario C | — |
 | 8 | Passer `base` à `'/'` dans `deploy/vite.config.ts` et reconstruire | si scénario C | `fb-deployer.sh` |
 | 9 | DNS et Caddy | si scénario C | `fb-caddy.sh` |
-| 10 | Supervision par timer systemd | non | `fb-verifier.sh` |
-| 11 | Étendre la sauvegarde aux deux dossiers | non | — |
+| 10 | Trois moniteurs dans Uptime Kuma, déjà installé | non | — |
+| 11 | **Établir s'il existe une sauvegarde. Aucune n'est visible sur la machine.** | oui | — |
+| 11 bis | Appliquer les 23 mises à jour et redémarrer | non | — |
 | 12 | Documentation utilisateur | non | — |
 
 Les étapes 1 à 5 ne dépendent d'aucune décision. Elles peuvent démarrer aujourd'hui.

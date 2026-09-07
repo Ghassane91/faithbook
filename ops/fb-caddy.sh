@@ -36,19 +36,26 @@ export FB_DRY
 [ -n "$ACTION" ] || { sed -n '2,16p' "$0"; exit 2; }
 
 CADDY_BAK="${FB_DEPLOY_ROOT}/caddy"
+
+if ! fb_caddy_detect; then
+  mort "Caddyfile introuvable. Mode detecte : ${FB_CADDY_MODE:-inconnu}. Renseigner FB_CADDYFILE dans faithbook-env.sh."
+fi
+log "mode Caddy           : $FB_CADDY_MODE"
+log "Caddyfile (hote)     : $FB_CADDYFILE"
+[ "$FB_CADDY_MODE" = "docker" ] && log "conteneur            : $FB_CADDY_CONTAINER"
 fb_sudo_init "$FB_CADDYFILE"
 
 masquer() { fb_masquer; }
 
 valider() {
-  local f="$1"
-  command -v caddy >/dev/null 2>&1 || return 2
-  if caddy validate --config "$f" >/tmp/fb-caddy-valid.$$ 2>&1; then
-    rm -f /tmp/fb-caddy-valid.$$; return 0
-  else
-    printf '\nErreurs de validation :\n'; sed 's/^/  /' /tmp/fb-caddy-valid.$$; rm -f /tmp/fb-caddy-valid.$$
-    return 1
+  local f="$1" rc=0
+  fb_caddy_valider "$f" || rc=$?
+  if [ "$rc" -eq 1 ] && [ -f /tmp/fb-caddy-valid.$$ ]; then
+    printf '
+Erreurs de validation :
+'; sed 's/^/  /' /tmp/fb-caddy-valid.$$; rm -f /tmp/fb-caddy-valid.$$
   fi
+  return "$rc"
 }
 
 case "$ACTION" in
@@ -64,7 +71,7 @@ case "$ACTION" in
     rc=0; valider "$FB_CADDYFILE" || rc=$?
     case "$rc" in
       0) log "configuration en place : valide" ;;
-      2) log "binaire caddy absent : validation IMPOSSIBLE, statut inconnu"; exit 3 ;;
+      2) log "validation IMPOSSIBLE (ni conteneur ni binaire caddy), statut inconnu"; exit 3 ;;
       *) mort "la configuration EN PLACE est invalide" ;;
     esac
     ;;
@@ -87,7 +94,7 @@ case "$ACTION" in
     rc=0; valider "$FICHIER" || rc=$?
     case "$rc" in
       0) log "nouvelle configuration : valide" ;;
-      2) log "binaire caddy absent : la configuration N'A PAS ETE VALIDEE"
+      2) log "validation IMPOSSIBLE : la configuration N'A PAS ETE VALIDEE"
          log "le retour arriere automatique reste actif en cas d'echec du rechargement" ;;
       *) mort "la nouvelle configuration est invalide, rien n'a ete modifie" ;;
     esac
@@ -118,11 +125,15 @@ case "$ACTION" in
 
     etape "4. Installation et rechargement"
     sx cp -a "$FICHIER" "$FB_CADDYFILE"
-    if ! sx systemctl reload caddy; then
+    if ! fb_caddy_recharger; then
       log "RECHARGEMENT EN ECHEC, retour arriere immediat"
       sx cp -a "$SAUVE" "$FB_CADDYFILE"
-      sx systemctl reload caddy || log "le rechargement de secours a aussi echoue, intervention manuelle requise"
-      mort "rechargement impossible. Journal : journalctl -u caddy -n 50"
+      fb_caddy_recharger || log "le rechargement de secours a aussi echoue, intervention manuelle requise"
+      if [ "$FB_CADDY_MODE" = "docker" ]; then
+        mort "rechargement impossible. Journal : docker logs --tail 50 $FB_CADDY_CONTAINER"
+      else
+        mort "rechargement impossible. Journal : journalctl -u caddy -n 50"
+      fi
     fi
     log "Caddy recharge"
     sleep 3
@@ -134,12 +145,12 @@ case "$ACTION" in
     else
       printf '\nVERIFICATION EN ECHEC, retour arriere automatique.\n'
       sx cp -a "$SAUVE" "$FB_CADDYFILE"
-      sx systemctl reload caddy || log "le rechargement de secours a echoue, intervention manuelle requise"
+      fb_caddy_recharger || log "le rechargement de secours a echoue, intervention manuelle requise"
       sleep 3
       if bash "$HERE/fb-verifier.sh" >/dev/null 2>&1; then
         mort "nouvelle configuration rejetee, configuration precedente remise en place et verifiee"
       else
-        mort "nouvelle configuration rejetee ET la configuration precedente ne passe pas la verification. Intervention manuelle : journalctl -u caddy -n 50"
+        mort "nouvelle configuration rejetee ET la configuration precedente ne passe pas la verification. Intervention manuelle immediate."
       fi
     fi
     ;;
@@ -152,7 +163,7 @@ case "$ACTION" in
     rc=0; valider "$SRC" || rc=$?
     case "$rc" in
       0) log "sauvegarde valide" ;;
-      2) log "binaire caddy absent : sauvegarde non validee" ;;
+      2) log "validation impossible : sauvegarde non validee" ;;
       *) mort "la sauvegarde est invalide, restauration annulee" ;;
     esac
     if [ "$FB_DRY" -eq 1 ]; then log "mode a blanc, rien de modifie"; exit 0; fi
@@ -160,7 +171,7 @@ case "$ACTION" in
     sx mkdir -p "$CADDY_BAK"
     sx cp -a "$FB_CADDYFILE" "$CADDY_BAK/Caddyfile.$TS-avant-restauration"
     sx cp -a "$SRC" "$FB_CADDYFILE"
-    sx systemctl reload caddy || mort "rechargement en echec. Journal : journalctl -u caddy -n 50"
+    fb_caddy_recharger || mort "rechargement en echec. Voir les journaux de Caddy."
     sleep 3
     bash "$HERE/fb-verifier.sh" || log "restauration en place mais verification en echec"
     log "restauration terminee"

@@ -49,6 +49,16 @@ Lues dans le dépôt, pas supposées :
 
 `npm run build` produit la version Cloudflare Workers, pas les fichiers servis par Caddy. Ne pas confondre.
 
+## Particularités de ce serveur
+
+Relevées le 7 septembre 2026 :
+
+- **Caddy tourne dans Docker** (conteneur `caddy`). Pas de `systemctl reload caddy`, pas de `/etc/caddy/Caddyfile` sur l'hôte. `fb-caddy.sh` le détecte seul.
+- **Node et npm ne sont pas installés.** Construire ailleurs, puis `./fb-deployer.sh --from-archive`.
+- **Aucun outil de sauvegarde installé.** À vérifier avant toute livraison.
+- Le dossier servi appartient à `root` : les scripts passent par `sudo` automatiquement.
+- `uptime-kuma` tourne déjà : c'est là qu'il faut brancher la surveillance.
+
 ## Principes
 
 - Aucun script ne supprime quoi que ce soit lors d'un déploiement.
