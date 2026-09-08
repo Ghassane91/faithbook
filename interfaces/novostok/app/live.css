@@ -8,3 +8,5 @@
 .viewer-help{font-size:12px;color:#aaa;margin:0}.viewer-header>div{flex:1;min-width:0}@media(max-width:640px){.viewer-header{flex-wrap:wrap}.viewer-help{font-size:11px}}
 
 .viewer-image-actions{display:flex;justify-content:flex-end;min-height:0}.viewer-image-actions:empty{display:none}.viewer-image-actions a{font-size:12px;padding:6px 10px}.viewer-image-state{padding:20px}.viewer-image-state p{padding:0 0 16px}
+
+.day-navigation{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.day-navigation button{border:1px solid #555;padding:7px 10px;font-size:12px;color:#e8e6e3}.day-navigation button:hover{background:#333}.day-navigation button:focus-visible{outline:2px solid #e8e6e3;outline-offset:2px}.lecture-carte footer{flex-wrap:wrap;gap:12px}

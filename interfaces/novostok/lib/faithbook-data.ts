@@ -1,4 +1,10 @@
 export const organizationKey='faithbook_organization_id';
+export function shiftDay(day:string,offset:number){
+ const date=new Date(day+'T12:00:00Z');
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isInteger(offset)||Number.isNaN(date.getTime())||date.toISOString().slice(0,10)!==day)throw new Error('Date invalide.');
+ date.setUTCDate(date.getUTCDate()+offset);
+ return date.toISOString().slice(0,10);
+}
 export function safeUrl(value:string):string|null{try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password?u.href:null;}catch{return null;}}
 export function sourceChannel(value:string){try{const host=new URL(value).hostname.toLowerCase();return host==='facebook.com'||host.endsWith('.facebook.com')?'Facebook':'Site web';}catch{return 'Site web';}}
 export function dayInZone(now:Date,timezone:string){const p=new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);const get=(type:string)=>p.find(x=>x.type===type)!.value;return `${get('year')}-${get('month')}-${get('day')}`;}
