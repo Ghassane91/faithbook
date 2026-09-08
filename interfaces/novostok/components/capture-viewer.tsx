@@ -7,12 +7,13 @@ import {readableTime} from '@/lib/faithbook-data';
 import type {RunSummary,Target} from '@/lib/faithbook-types';
 
 function FullImage({org,run,zoom,expire}:{org:number;run:RunSummary;zoom:number;expire:()=>void}){
- const [url,setUrl]=useState(''),[error,setError]=useState('');
+ const [url,setUrl]=useState(''),[error,setError]=useState(''),[revision,setRevision]=useState(0),[extension,setExtension]=useState('png');
  useEffect(()=>{const c=new AbortController();let blobUrl='';setUrl('');setError('');
-  api.image(org,run.id,true,c.signal).then(blob=>{if(c.signal.aborted)return;blobUrl=URL.createObjectURL(blob);setUrl(blobUrl)}).catch(e=>{if(c.signal.aborted)return;if(e instanceof ApiError&&e.status===401)expire();else setError('Image indisponible. Fermez puis rouvrez la capture pour réessayer.')});
+  api.image(org,run.id,true,c.signal).then(blob=>{if(c.signal.aborted)return;blobUrl=URL.createObjectURL(blob);setExtension(blob.type.includes('jpeg')?'jpg':blob.type.includes('webp')?'webp':'png');setUrl(blobUrl)}).catch(e=>{if(c.signal.aborted)return;if(e instanceof ApiError&&e.status===401)expire();else setError('Image indisponible. Vous pouvez réessayer sans fermer la visionneuse.')});
   return()=>{c.abort();if(blobUrl)URL.revokeObjectURL(blobUrl)};
- },[org,run.id,expire]);
- return <div className="viewer-scroll" tabIndex={0} aria-label="Image défilable">{url?<img src={url} alt={'Capture #'+run.id} style={{width:zoom+'%',maxWidth:'none'}} onError={()=>{setUrl('');setError('Cette image ne peut pas être affichée.')}}/>:<p role="status">{error||'Chargement de l’image originale…'}</p>}</div>;
+ },[org,run.id,expire,revision]);
+ return <><div className="viewer-image-actions">{url&&<a className="outline-action" href={url} download={'faithbook-'+run.capture_date+'-'+run.id+'.'+extension}>Télécharger cette image</a>}</div><div className="viewer-scroll" tabIndex={0} aria-label="Image défilable">{url?<img src={url} alt={'Capture #'+run.id} style={{width:zoom+'%',maxWidth:'none'}} onError={()=>{setUrl('');setError('Cette image ne peut pas être affichée.')}}/>:<div className="viewer-image-state"><p role={error?'alert':'status'}>{error||'Chargement de l’image originale…'}</p>{error&&<button className="outline-action" onClick={()=>setRevision(v=>v+1)}>Réessayer</button>}</div>}</div></>;
+
 }
 export function CaptureViewer({org,initial,date,targetId,targets,timezone,expire,onClose,onDetails}:{org:number;initial:RunSummary;date:string;targetId?:number;targets:Target[];timezone:string;expire:()=>void;onClose:()=>void;onDetails:(run:RunSummary)=>void}){
  const [current,setCurrent]=useState(initial),[runs,setRuns]=useState<RunSummary[]>([initial]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[zoom,setZoom]=useState(100),[compare,setCompare]=useState(false),[previous,setPrevious]=useState<RunSummary|null>(null),[comparing,setComparing]=useState(false),[compareError,setCompareError]=useState('');
