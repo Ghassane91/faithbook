@@ -51,8 +51,8 @@ fb_recouvrir() {
     printf '  [a blanc] copie de %s vers %s%s\n' "$src" "$dst" "${exclu:+ (sauf $exclu)}"
     return 0
   fi
-  [ -d "$src" ] || mort "source de copie introuvable : $src"
-  [ -d "$dst" ] || mort "destination de copie introuvable : $dst"
+  fb_test -d "$src" || mort "source de copie introuvable : $src"
+  fb_test -d "$dst" || mort "destination de copie introuvable : $dst"
   # L'elevation s'applique AUX DEUX COTES : sur ce serveur le dossier servi et
   # les sauvegardes appartiennent a root, la lecture aussi demande sudo.
   local S=""; [ -n "${FB_SUDO:-}" ] && S="$FB_SUDO"
@@ -71,12 +71,12 @@ fb_miroir() {
     printf '  [a blanc] miroir de %s vers %s (suppressions comprises)\n' "$src" "$dst"
     return 0
   fi
-  [ -d "$src" ] || mort "source de restauration introuvable : $src"
+  fb_test -d "$src" || mort "source de restauration introuvable : $src"
   case "$dst" in
     ""|"/"|"/*"|"/home"|"/opt"|"/etc"|"/var"|"/usr") mort "destination refusee : $dst" ;;
   esac
   [ "${#dst}" -ge 10 ] || mort "destination trop courte, refusee par securite : $dst"
-  [ -d "$dst" ] || mort "destination de restauration introuvable : $dst"
+  fb_test -d "$dst" || mort "destination de restauration introuvable : $dst"
   if command -v rsync >/dev/null 2>&1; then
     sx rsync -a --delete "$src/" "$dst/"
   else

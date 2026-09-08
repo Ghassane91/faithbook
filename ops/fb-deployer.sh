@@ -164,11 +164,17 @@ etape "3. Sauvegarde de l'etat courant"
 sx mkdir -p "$BAK/site.before"
 fb_recouvrir "$FB_SITE_DIR" "$BAK/site.before"
 log "site sauvegarde      : $BAK/site.before"
-if [ -f "$FB_CADDYFILE" ]; then
+# FB_CADDYFILE est vide par defaut : Caddy tourne en conteneur sur ce serveur,
+# le chemin sur l'hote se deduit des montages Docker.
+if [ -z "${FB_CADDYFILE:-}" ] && declare -F fb_caddy_detect >/dev/null 2>&1; then
+  fb_caddy_detect >/dev/null 2>&1 || true
+fi
+if [ -n "${FB_CADDYFILE:-}" ] && fb_test -f "$FB_CADDYFILE"; then
   sx cp -a "$FB_CADDYFILE" "$BAK/Caddyfile.before"
   log "Caddyfile sauvegarde : $BAK/Caddyfile.before"
+  log "mode Caddy           : ${FB_CADDY_MODE:-inconnu}"
 else
-  log "Caddyfile introuvable a $FB_CADDYFILE, sauvegarde ignoree"
+  log "Caddyfile non localise, sauvegarde ignoree (sans effet : ce script ne modifie pas Caddy)"
 fi
 
 # ------------------------------------------------------- 4. Publication
