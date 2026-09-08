@@ -36,6 +36,9 @@
 # --- Adresses publiques -----------------------------------------------------
 : "${FB_BASE_URL:=https://veille-novostok.duckdns.org}"
 : "${FB_PATH:=/nouvelle-interface/}"
+# Depuis le 8 septembre 2026 la racine redirige vers la nouvelle interface et
+# l'application historique vit sous /application/.
+: "${FB_LEGACY_PATH:=/application/}"
 
 # --- Retention des sauvegardes ---------------------------------------------
 : "${FB_KEEP_BACKUPS:=10}"

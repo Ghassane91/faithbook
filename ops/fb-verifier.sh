@@ -48,7 +48,16 @@ echo
 echo "1. Pages"
 attendu "$url_new"          "200" "Nouvelle interface"
 attendu "$url_new_noslash"  "308" "Redirection du chemin sans barre finale"
-attendu "${base}/"          "200" "Application historique"
+# La racine peut renvoyer 200 (ancien routage) ou une redirection vers la
+# nouvelle interface (routage du 8 septembre 2026). Les deux sont valides.
+racine="$(code_of "${base}/")"
+case "$racine" in
+  200)         ok "Racine — 200 (sert directement une interface)" ;;
+  301|302|308) ok "Racine — $racine (redirige vers la nouvelle interface)" ;;
+  000)         ko "Racine — serveur injoignable" ;;
+  *)           ko "Racine — attendu 200 ou une redirection, obtenu $racine" ;;
+esac
+attendu "${base}${FB_LEGACY_PATH:-/application/}" "200" "Application historique"
 
 echo
 echo "2. Actifs references par l'index"
