@@ -1,0 +1,27 @@
+'use client';
+import {useEffect,useState} from 'react';
+import {Dialog,DialogContent,DialogTitle,DialogDescription,DialogClose} from '@/components/ui/dialog';
+import {api,ApiError} from '@/lib/faithbook-api';
+import {collectRuns,previousCapture} from '@/lib/capture-navigation';
+import {readableTime} from '@/lib/faithbook-data';
+import type {RunSummary,Target} from '@/lib/faithbook-types';
+
+function FullImage({org,run,zoom,expire}:{org:number;run:RunSummary;zoom:number;expire:()=>void}){
+ const [url,setUrl]=useState(''),[error,setError]=useState('');
+ useEffect(()=>{const c=new AbortController();let blobUrl='';setUrl('');setError('');
+  api.image(org,run.id,true,c.signal).then(blob=>{if(c.signal.aborted)return;blobUrl=URL.createObjectURL(blob);setUrl(blobUrl)}).catch(e=>{if(c.signal.aborted)return;if(e instanceof ApiError&&e.status===401)expire();else setError('Image indisponible. Fermez puis rouvrez la capture pour réessayer.')});
+  return()=>{c.abort();if(blobUrl)URL.revokeObjectURL(blobUrl)};
+ },[org,run.id,expire]);
+ return <div className="viewer-scroll" tabIndex={0} aria-label="Image défilable">{url?<img src={url} alt={'Capture #'+run.id} style={{width:zoom+'%',maxWidth:'none'}} onError={()=>{setUrl('');setError('Cette image ne peut pas être affichée.')}}/>:<p role="status">{error||'Chargement de l’image originale…'}</p>}</div>;
+}
+export function CaptureViewer({org,initial,date,targetId,targets,timezone,expire,onClose}:{org:number;initial:RunSummary;date:string;targetId?:number;targets:Target[];timezone:string;expire:()=>void;onClose:()=>void}){
+ const [current,setCurrent]=useState(initial),[runs,setRuns]=useState<RunSummary[]>([initial]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[zoom,setZoom]=useState(100),[compare,setCompare]=useState(false),[previous,setPrevious]=useState<RunSummary|null>(null),[comparing,setComparing]=useState(false),[compareError,setCompareError]=useState('');
+ useEffect(()=>{const c=new AbortController();collectRuns(offset=>api.runs(org,{capture_date:date,status:'success',target_id:targetId,limit:100,offset},c.signal),c.signal).then(rows=>{if(!rows.some(r=>r.id===initial.id))rows.unshift(initial);setRuns(rows)}).catch(e=>{if(c.signal.aborted)return;if(e instanceof ApiError&&e.status===401)expire();else setError('Navigation indisponible. Fermez puis rouvrez la capture pour réessayer.')}).finally(()=>{if(!c.signal.aborted)setLoading(false)});return()=>c.abort()},[org,date,targetId,initial,expire]);
+ useEffect(()=>{setPrevious(null);setCompareError('');if(!compare)return;const c=new AbortController();setComparing(true);
+  collectRuns(offset=>api.runs(org,{target_id:current.target_id,status:'success',limit:100,offset},c.signal),c.signal).then(rows=>setPrevious(previousCapture(rows,current))).catch(e=>{if(c.signal.aborted)return;if(e instanceof ApiError&&e.status===401)expire();else setCompareError('Comparaison indisponible. Désactivez puis réactivez la comparaison pour réessayer.')}).finally(()=>{if(!c.signal.aborted)setComparing(false)});return()=>c.abort();
+ },[org,current,compare,expire]);
+ const index=runs.findIndex(r=>r.id===current.id);
+ function move(delta:number){const next=runs[index+delta];if(next){setCurrent(next);setZoom(100);setCompare(false)}}
+ const name=targets.find(t=>t.id===current.target_id)?.name??'Cible #'+current.target_id;
+ return <Dialog open onOpenChange={open=>{if(!open)onClose()}}><DialogContent className="capture-viewer" showCloseButton={false}><header className="viewer-header"><div><DialogTitle>{name}</DialogTitle><DialogDescription>{readableTime(current.started_at,timezone)} · Capture #{current.id}</DialogDescription></div><DialogClose className="outline-action">Fermer</DialogClose></header><nav className="viewer-controls" aria-label="Outils de lecture"><button disabled={loading||index<=0} onClick={()=>move(-1)}>← Précédente</button><span>{loading?'Chargement…':`${index+1} / ${runs.length}`}</span><button disabled={loading||index>=runs.length-1} onClick={()=>move(1)}>Suivante →</button><button disabled={zoom<=50} onClick={()=>setZoom(z=>Math.max(50,z-25))} aria-label="Réduire le zoom">−</button><span>{zoom} %</span><button disabled={zoom>=300} onClick={()=>setZoom(z=>Math.min(300,z+25))} aria-label="Augmenter le zoom">+</button><button onClick={()=>setZoom(100)}>Ajuster à la largeur</button><button aria-pressed={compare} onClick={()=>setCompare(v=>!v)}>Comparer avec la capture précédente</button></nav>{error&&<p role="alert">{error}</p>}<div className={'viewer-images'+(compare?' is-comparing':'')}>{compare&&<section><h3>Capture précédente {previous&&' · '+readableTime(previous.started_at,timezone)}</h3>{comparing?<p role="status">Recherche de la capture précédente…</p>:compareError?<p role="alert">{compareError}</p>:previous?<FullImage key={previous.id} org={org} run={previous} zoom={zoom} expire={expire}/>:<p>Aucune capture réussie antérieure pour cette cible.</p>}</section>}<section><h3>Capture sélectionnée · {readableTime(current.started_at,timezone)}</h3><FullImage key={current.id} org={org} run={current} zoom={zoom} expire={expire}/></section></div></DialogContent></Dialog>;
+}
