@@ -151,6 +151,12 @@ class Settings(BaseSettings):
     ollama_keep_alive: str = "5m"
     ollama_num_predict: int = 180
 
+    # Analyse visuelle : modèle multimodal explicitement choisi par l'administrateur.
+    visual_analysis_enabled: bool = False
+    visual_analysis_provider: Literal["anthropic", "ollama"] = "anthropic"
+    visual_analysis_model: str = ""
+    visual_analysis_daily_limit: int = 20
+
     # --- Canaux d alerte complementaires (vides = inactifs) ---
     notify_telegram_bot_token: str = ""
     notify_telegram_chat_id: str = ""

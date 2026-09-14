@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import accounts
 from app.api import auth as auth_api
-from app.api import organizations, runs, system, targets
+from app.api import organizations, runs, system, targets, visual
 from app.config import settings
 from app.database import init_db, session_scope
 from app.scheduler import mark_interrupted_runs, shutdown_scheduler, start_scheduler
@@ -110,3 +110,5 @@ def root():
         "docs": "/docs" if _docs_enabled else None,
         "health": "/api/health",
     }
+
+app.include_router(visual.router)

@@ -5,6 +5,7 @@ import { RunDetail } from './components/RunDetail'
 import { delai, useData, useRoute } from './lib'
 import { ChangerMotDePasse } from './views/ChangerMotDePasse'
 import { AccepterInvitation } from './views/AccepterInvitation'
+import { Analyse } from './views/Analyse'
 import { Accueil } from './views/Accueil'
 import { Cibles } from './views/Cibles'
 import { Comptes } from './views/Comptes'
@@ -17,6 +18,7 @@ import { Reinitialiser } from './views/Reinitialiser'
 import type { OrganizationUsage } from './types'
 
 const VUES = [
+  { cle: 'analyse', idx: 'AI', titre: 'Analyse des captures', icon: 'board' },
   { cle: 'accueil', idx: '00', titre: 'Accueil', icon: 'board' },
   { cle: 'planche', idx: '01', titre: 'Planche du jour', icon: 'board' },
   { cle: 'cibles', idx: '02', titre: 'Cibles', icon: 'target' },
@@ -271,7 +273,9 @@ function AppConnecte() {
         </header>
 
         <div className="workspace-view" key={route}>
-          {route === 'accueil' ? (
+          {route === 'analyse' ? (
+            <Analyse canEdit={canEdit} />
+          ) : route === 'accueil' ? (
             <Accueil onAller={aller} />
           ) : route === 'cibles' ? (
             <Cibles

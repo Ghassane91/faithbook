@@ -49,12 +49,12 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const organizationId = selectedOrganizationId()
   const res = await fetch(BASE + path, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...(organizationId ? { 'X-Organization-ID': String(organizationId) } : {}),
       ...(init?.headers ?? {}),
     },

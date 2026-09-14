@@ -64,7 +64,7 @@ def test_facebook_utilise_la_capture_assemblee():
 
 @pytest.mark.asyncio
 async def test_capture_assemble_chaque_fenetre_sans_trou(tmp_path):
-    destination = tmp_path / "stitched.png"
+    destination = tmp_path / "stitched.jpg"
     page = FakePage()
 
     steps, height = await capture_stitched_page(
@@ -80,5 +80,9 @@ async def test_capture_assemble_chaque_fenetre_sans_trou(tmp_path):
     assert page.y == 0
     with Image.open(destination) as image:
         assert image.size == (600, 1000)
-        assert image.getpixel((10, 50)) == (0, 80, 120)
+        # Production uses lossy JPEG: preserve the color/coverage assertion
+        # without requiring lossless RGB equality.
+        assert image.format == "JPEG"
+        assert all(abs(actual - expected) <= 2 for actual, expected
+                   in zip(image.getpixel((10, 50)), (0, 80, 120)))
         assert image.getpixel((10, 500))[0] > 0

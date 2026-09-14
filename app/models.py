@@ -452,3 +452,20 @@ class RunLog(Base):
     attempt: Mapped[int | None] = mapped_column(Integer)
 
     run: Mapped[Run] = relationship(back_populates="logs")
+
+
+class VisualAnalysis(Base):
+    __tablename__ = "visual_analyses"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    question: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(300))
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    storage_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    archive_status: Mapped[str] = mapped_column(String(20), default="local")
+    archive_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archive_manifest: Mapped[str] = mapped_column(Text, default="{}")

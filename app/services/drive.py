@@ -178,7 +178,7 @@ class DriveClient:
         files = found.get("files", [])
         return files[0] if files else None
 
-    def upload(self, path: Path, folder_id: str, filename: str | None = None) -> UploadResult:
+    def upload(self, path: Path, folder_id: str, filename: str | None = None, *, mimetype: str = "image/png") -> UploadResult:
         """Televerse le fichier ; si un fichier de meme nom existe deja, ne le duplique pas."""
         from googleapiclient.http import MediaFileUpload
 
@@ -201,7 +201,7 @@ class DriveClient:
 
             media = MediaFileUpload(
                 str(path),
-                mimetype="image/png",
+                mimetype=mimetype,
                 resumable=True,
                 chunksize=5 * 1024 * 1024,
             )
