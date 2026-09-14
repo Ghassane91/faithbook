@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import mimetypes
+
 import logging
 import threading
 from dataclasses import dataclass
@@ -12,6 +14,26 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
+
+
+def _type_mime(chemin: Path) -> str:
+    """Type MIME deduit de l extension.
+
+    Le client ne transporte plus seulement des captures PNG : les exports
+    CSV, JSON et Markdown doivent arriver sur Drive avec le bon type, sinon
+    Google les affiche comme des images et refuse de les previsualiser.
+    """
+    devine, _ = mimetypes.guess_type(chemin.name)
+    if devine:
+        return devine
+    suffixe = chemin.suffix.lower()
+    return {
+        ".md": "text/markdown",
+        ".csv": "text/csv",
+        ".json": "application/json",
+        ".ndjson": "application/x-ndjson",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }.get(suffixe, "application/octet-stream")
 
 
 class DriveNotConfigured(RuntimeError):
@@ -201,7 +223,7 @@ class DriveClient:
 
             media = MediaFileUpload(
                 str(path),
-                mimetype="image/png",
+                mimetype=_type_mime(path),
                 resumable=True,
                 chunksize=5 * 1024 * 1024,
             )
