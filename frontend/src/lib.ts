@@ -147,7 +147,7 @@ export function useData<T>(
 
 /** Routeur minimal sur le hash : evite une dependance pour trois vues. */
 export function useRoute(): [string, (r: string) => void] {
-  const ROUTES = ['accueil', 'planche', 'cibles', 'comptes', 'historique', 'organisation', 'mentions']
+  const ROUTES = ['accueil', 'planche', 'cibles', 'comptes', 'historique', 'organisation', 'analyse', 'mentions']
   const lire = () => {
     const r = window.location.hash.replace(/^#\/?/, '')
     return ROUTES.includes(r) ? r : 'accueil'
