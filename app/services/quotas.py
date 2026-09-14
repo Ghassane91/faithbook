@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Account, Organization, Run, Target
+from app.models import Account, Organization, Run, Target, VisualAnalysis
 from app.services.capture import legacy_thumb_path, thumb_path
 
 
@@ -156,7 +156,9 @@ def _storage_bytes(
         .join(Target)
         .where(*filters)
     )
-    return int(value or 0)
+    visual_bytes = session.scalar(select(func.coalesce(func.sum(VisualAnalysis.storage_bytes), 0))
+        .where(VisualAnalysis.organization_id == organization_id))
+    return int(value or 0) + int(visual_bytes or 0)
 
 
 def organization_usage(

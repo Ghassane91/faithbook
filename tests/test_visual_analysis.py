@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from PIL import Image
+from fastapi.testclient import TestClient
+from app.main import app
 
 from app.config import settings
 from app.services import visual_analysis as vision
@@ -95,7 +97,8 @@ def test_formula_safe_export():
 
 
 def test_authenticated_upload_history_exports_and_isolation(auth_client, client, ready):
-    assert client.get("/api/visual").status_code == 401
+    anonymous = TestClient(app)
+    assert anonymous.get("/api/visual").status_code == 401
     created = create(auth_client)
     assert created.status_code == 201, created.text
     row = created.json()
@@ -194,3 +197,42 @@ def test_anthropic_adapter_sends_pixels_and_rejects_bad_citations(monkeypatch):
     bad[0] = True
     with pytest.raises(ValueError, match="inexistante"):
         vision.extract("prix", [vision.prepare_image(png())[0]])
+
+
+def test_existing_capture_import_and_provenance(auth_client, ready, public_example_dns):
+    from pathlib import Path
+    from app.models import Run, RunStatus
+    target = auth_client.post("/api/targets", json={"name": "Visual source",
+        "url": "https://example.com/", "run_time": "09:00"}).json()
+    path = Path(settings.screenshot_dir) / ("test-" + uuid.uuid4().hex + ".png")
+    path.write_bytes(png())
+    with session_scope() as session:
+        run = Run(target_id=target["id"], status=RunStatus.success,
+                  capture_date="2026-09-14", screenshot_path=str(path), idempotency_key=uuid.uuid4().hex)
+        session.add(run)
+        session.flush()
+        run_id = run.id
+    response = auth_client.post("/api/visual/from-runs",
+        json={"question": "prix ?", "run_ids": [run_id]})
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "success"
+    assert response.json()["run_ids"] == [run_id]
+    assert response.json()["source"] == "cible-" + str(target["id"])
+
+
+def test_visual_storage_quota_and_daily_limit(auth_client, ready, monkeypatch):
+    from app.models import Organization
+    org = auth_client.post("/api/organizations", json={"name": "Visual quota"}).json()
+    headers = {"X-Organization-ID": str(org["id"])}
+    with session_scope() as session:
+        session.get(Organization, org["id"]).quota_storage_bytes = 100
+    response = auth_client.post("/api/visual", headers=headers,
+        data={"question": "prix", "source": "test"}, files={"images": ("x.png", png(), "image/png")})
+    assert response.status_code == 429
+    with session_scope() as session:
+        session.get(Organization, org["id"]).quota_storage_bytes = 10_000_000
+    monkeypatch.setattr(settings, "visual_analysis_daily_limit", 1)
+    kwargs = dict(headers=headers, data={"question": "prix", "source": "test"},
+                  files={"images": ("x.png", png(), "image/png")})
+    assert auth_client.post("/api/visual", **kwargs).status_code == 201
+    assert auth_client.post("/api/visual", **kwargs).status_code == 429

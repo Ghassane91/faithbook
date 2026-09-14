@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { request, selectedOrganizationId } from '../api'
+import { api, request, selectedOrganizationId } from '../api'
 import './analyse.css'
+import type { RunSummary } from '../types'
 
 type Item = {
   image: number; name: string; brand: string | null; reference: string | null
@@ -29,6 +30,9 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
   const [config, setConfig] = useState<Config | null>(null)
   const [history, setHistory] = useState<Analysis[]>([])
   const [current, setCurrent] = useState<Analysis | null>(null)
+  const [runs, setRuns] = useState<RunSummary[]>([])
+  const [runIds, setRunIds] = useState<number[]>([])
+  const [mode, setMode] = useState('upload')
   const [files, setFiles] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([])
   const [question, setQuestion] = useState('Quelles caméras sont visibles et quels sont leurs prix ?')
@@ -41,6 +45,8 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
   async function refresh() {
     const [c, h] = await Promise.all([request<Config>('/visual/config'), request<Analysis[]>('/visual')])
     setConfig(c); setHistory(h)
+    const captured = await api.runs({status: 'success', limit: 50})
+    setRuns(captured.items)
   }
   useEffect(() => { refresh().catch(e => setError(e.message)) }, [])
   useEffect(() => {
@@ -54,12 +60,14 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
   async function analyze() {
     setError(''); setBusy(true); setChanges(null); setBefore('')
     try {
-      if (!source.trim() || !question.trim() || !files.length || files.length > 4)
+      if (!question.trim() || (mode === 'upload' ? (!source.trim() || !files.length || files.length > 4) : (!runIds.length || runIds.length > 4)))
         throw new Error('Ajoutez une source, une question et entre 1 et 4 images.')
       const body = new FormData()
       body.append('source', source); body.append('question', question)
       files.forEach(file => body.append('images', file))
-      const a = await request<Analysis>('/visual', {method: 'POST', body})
+      const a = mode === 'upload'
+        ? await request<Analysis>('/visual', {method: 'POST', body})
+        : await request<Analysis>('/visual/from-runs', {method: 'POST', body: JSON.stringify({question, run_ids: runIds})})
       setCurrent(a)
       if (a.status === 'success' && autoArchive && config?.drive_configured) await archive(a)
       else await refresh()
@@ -94,7 +102,9 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
     <div className="visual-grid">
       <section className="visual-card">
         <h2>1. Choisir les captures</h2>
-        <label className="visual-upload">PNG, JPEG ou WebP · 4 images maximum · 6 Mo par image
+        <label>Origine des images<select value={mode} disabled={busy} onChange={e => setMode(e.target.value)}><option value="upload">Importer depuis mon appareil</option><option value="runs">Captures FaithBook existantes</option></select></label>
+        {mode === 'runs' && <div className="visual-history">{runs.map(run => <label className="visual-check" key={run.id}><input type="checkbox" checked={runIds.includes(run.id)} disabled={busy} onChange={e => setRunIds(ids => e.target.checked ? [...ids, run.id] : ids.filter(id => id !== run.id))} />Cible {run.target_id} · {new Date(run.started_at).toLocaleString('fr-FR')}</label>)}</div>}
+        {mode === 'upload' && <><label className="visual-upload">PNG, JPEG ou WebP · 4 images maximum · 6 Mo par image
           <input aria-label="Captures à analyser" type="file" multiple accept="image/png,image/jpeg,image/webp"
             disabled={busy || !canEdit} onChange={e => setFiles(Array.from(e.target.files || []))} />
         </label>
@@ -104,14 +114,14 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
         </figure>)}</div>
         <label>Source suivie (même nom pour les comparaisons)
           <input maxLength={300} value={source} placeholder="Ex. Catalogue fournisseur — caméras"
-            onChange={e => setSource(e.target.value)} disabled={busy} /></label>
+            onChange={e => setSource(e.target.value)} disabled={busy} /></label></>}
         <label>2. Votre question
           <textarea rows={4} maxLength={2000} value={question} onChange={e => setQuestion(e.target.value)} disabled={busy} /></label>
         <label className="visual-check"><input type="checkbox" checked={autoArchive}
           onChange={e => setAutoArchive(e.target.checked)} disabled={busy} /> Archiver les résultats et les images dans Drive</label>
         {!config?.drive_configured && <p>Drive non configuré : les analyses resteront conservées dans FaithBook.</p>}
         <p>Les images seront transmises au modèle configuré : {config?.provider || '…'}. Vérifiez leur contenu avant l’envoi.</p>
-        <button className="visual-primary" disabled={busy || !canEdit || !config?.configured || !files.length}
+        <button className="visual-primary" disabled={busy || !canEdit || !config?.configured || (mode === 'upload' ? !files.length : !runIds.length)}
           onClick={analyze}>{busy ? 'Traitement en cours…' : 'Analyser les captures'}</button>
       </section>
       <aside className="visual-card"><h2>Analyses récentes</h2>

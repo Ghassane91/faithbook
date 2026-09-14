@@ -2,7 +2,8 @@
 
 ## Parcours
 Ouvrir l'interface FaithBook à `/#/analyse` après connexion.
-Importer 1 à 4 captures PNG/JPEG/WebP, donner un nom stable à la source et poser
+Importer 1 à 4 captures PNG/JPEG/WebP, ou choisir les captures existantes d'une même cible.
+Pour les imports, donner un nom stable à la source et poser
 une question libre. Les images sont réellement transmises au modèle multimodal
 configuré. Les données de l'image ne sont jamais exécutées comme des instructions.
 
@@ -66,7 +67,10 @@ Recette de production à effectuer avec les accès privés configurés :
 
 ## Limites explicites de cette version
 Pas de surveillance automatique ni d'exécution de commandes ; l'analyse est
-déclenchée par l'utilisateur. Les captures sont importées depuis l'appareil.
+déclenchée par l'utilisateur. Les captures sont importées depuis l'appareil ou copiées depuis les exécutions FaithBook.
+Les analyses réservent le poids des originaux plus 1 Mo pour les résultats dans le quota
+organisation. La comparaison suit l'ordre de création des analyses : pour comparer
+chronologiquement des exécutions, analyser d'abord la capture la plus ancienne.
 Les résultats sont exportables, mais l'édition en ligne n'est pas incluse.
 La suppression dans FaithBook retire uniquement la copie locale ; la copie Drive
 reste sous le contrôle de l'équipe Workspace. La rétention des analyses est

@@ -16,6 +16,7 @@ def upgrade():
         sa.Column("status", sa.String(20), nullable=False),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("payload", sa.Text(), nullable=False),
+        sa.Column("storage_bytes", sa.BigInteger(), nullable=False),
         sa.Column("archive_status", sa.String(20), nullable=False),
         sa.Column("archive_started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("archive_manifest", sa.Text(), nullable=False))

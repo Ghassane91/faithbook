@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
 import uuid
@@ -12,12 +13,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from app.api.deps import current_organization, organization_member
 from app.config import settings
 from app.database import get_session
-from app.models import Organization, VisualAnalysis
+from app.models import Organization, VisualAnalysis, Run, Target, RunStatus
 from app.services import visual_analysis as vision
+from app.services.quotas import organization_usage
 from app.services.drive import drive_client
 
 router = APIRouter(prefix="/api/visual", tags=["Analyse des captures"])
@@ -89,7 +92,12 @@ def create(question: str = Form(..., min_length=1, max_length=2000),
         VisualAnalysis.created_at >= day_start))
     if used >= max(1, settings.visual_analysis_daily_limit):
         raise HTTPException(429, "Limite quotidienne d'analyses atteinte.")
-    row = VisualAnalysis(id=uuid.uuid4().hex, organization_id=context.organization.id,
+    # Reserve original bytes plus bounded result/export overhead before writing.
+    reservation = sum(map(len, originals)) + 1_000_000
+    usage = organization_usage(session, context.organization.id)
+    if not usage.storage_bytes.unlimited and usage.storage_bytes.used + reservation > usage.storage_bytes.limit:
+        raise HTTPException(429, "Quota de stockage de l'organisation atteint.")
+    row = VisualAnalysis(storage_bytes=reservation, id=uuid.uuid4().hex, organization_id=context.organization.id,
         created_at=now, question=question.strip(), source=source.strip(), status="running")
     session.add(row)
     session.commit()
@@ -119,6 +127,50 @@ def create(question: str = Form(..., min_length=1, max_length=2000),
         row.error = "Analyse interrompue ou réponse IA invalide. Les images enregistrées restent disponibles."
     session.commit()
     return view(row)
+
+
+
+class RunsInput(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    run_ids: list[int] = Field(min_length=1, max_length=4)
+
+
+@router.post("/from-runs", status_code=201)
+def from_runs(body: RunsInput, session: Session = Depends(get_session), context=Depends(organization_member)):
+    selected = []
+    for run_id in body.run_ids:
+        run = session.get(Run, run_id)
+        target = session.get(Target, run.target_id) if run else None
+        if not run or not target or target.organization_id != context.organization.id:
+            raise HTTPException(404, "Capture introuvable.")
+        if run.status != RunStatus.success or not run.screenshot_path:
+            raise HTTPException(409, "Capture non disponible.")
+        selected.append((run, target))
+    if len({target.id for _, target in selected}) != 1:
+        raise HTTPException(422, "Choisissez des captures d'une seule cible.")
+    uploads = []
+    root = Path(settings.screenshot_dir).resolve()
+    try:
+        for run, _ in selected:
+            path = Path(run.screenshot_path).resolve()
+            if not path.is_relative_to(root) or not path.is_file():
+                raise HTTPException(404, "Fichier de capture local indisponible.")
+            with path.open("rb") as stream:
+                raw = stream.read(vision.MAX_BYTES + 1)
+            uploads.append(UploadFile(filename="capture", file=io.BytesIO(raw)))
+        response = create(question=body.question, source="cible-" + str(selected[0][1].id),
+                          images=uploads, session=session, context=context)
+        # Preserve provenance in addition to the copied original's hash.
+        row = session.get(VisualAnalysis, response["id"])
+        payload = json.loads(row.payload)
+        payload["run_ids"] = body.run_ids
+        payload["captured_at"] = [run.started_at.isoformat() for run, _ in selected]
+        row.payload = json.dumps(payload, ensure_ascii=False)
+        session.commit()
+        return view(row)
+    finally:
+        for upload in uploads:
+            upload.file.close()
 
 
 @router.get("/{analysis_id}")

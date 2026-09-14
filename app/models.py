@@ -465,6 +465,7 @@ class VisualAnalysis(Base):
     status: Mapped[str] = mapped_column(String(20), default="running")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[str] = mapped_column(Text, default="{}")
+    storage_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     archive_status: Mapped[str] = mapped_column(String(20), default="local")
     archive_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     archive_manifest: Mapped[str] = mapped_column(Text, default="{}")
