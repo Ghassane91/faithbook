@@ -207,7 +207,7 @@ def test_existing_capture_import_and_provenance(auth_client, ready, public_examp
     path = Path(settings.screenshot_dir) / ("test-" + uuid.uuid4().hex + ".png")
     path.write_bytes(png())
     with session_scope() as session:
-        run = Run(target_id=target["id"], status=RunStatus.success,
+        run = Run(target_id=target["id"], status=RunStatus.success, trigger="manual",
                   capture_date="2026-09-14", screenshot_path=str(path), idempotency_key=uuid.uuid4().hex)
         session.add(run)
         session.flush()

@@ -30,6 +30,7 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
   const [config, setConfig] = useState<Config | null>(null)
   const [history, setHistory] = useState<Analysis[]>([])
   const [current, setCurrent] = useState<Analysis | null>(null)
+  const [targetNames, setTargetNames] = useState<Record<number, string>>({})
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [runIds, setRunIds] = useState<number[]>([])
   const [mode, setMode] = useState('upload')
@@ -45,8 +46,9 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
   async function refresh() {
     const [c, h] = await Promise.all([request<Config>('/visual/config'), request<Analysis[]>('/visual')])
     setConfig(c); setHistory(h)
-    const captured = await api.runs({status: 'success', limit: 50})
+    const [captured, targets] = await Promise.all([api.runs({status: 'success', limit: 50}), api.targets()])
     setRuns(captured.items)
+    setTargetNames(Object.fromEntries(targets.map(target => [target.id, target.name])))
   }
   useEffect(() => { refresh().catch(e => setError(e.message)) }, [])
   useEffect(() => {
@@ -103,7 +105,7 @@ export function Analyse({canEdit}: {canEdit: boolean}) {
       <section className="visual-card">
         <h2>1. Choisir les captures</h2>
         <label>Origine des images<select value={mode} disabled={busy} onChange={e => setMode(e.target.value)}><option value="upload">Importer depuis mon appareil</option><option value="runs">Captures FaithBook existantes</option></select></label>
-        {mode === 'runs' && <div className="visual-history">{runs.map(run => <label className="visual-check" key={run.id}><input type="checkbox" checked={runIds.includes(run.id)} disabled={busy} onChange={e => setRunIds(ids => e.target.checked ? [...ids, run.id] : ids.filter(id => id !== run.id))} />Cible {run.target_id} · {new Date(run.started_at).toLocaleString('fr-FR')}</label>)}</div>}
+        {mode === 'runs' && <div className="visual-history">{runs.map(run => <label className="visual-check" key={run.id}><input type="checkbox" checked={runIds.includes(run.id)} disabled={busy} onChange={e => setRunIds(ids => e.target.checked ? [...ids, run.id] : ids.filter(id => id !== run.id))} />{targetNames[run.target_id] || 'Capture'} · {new Date(run.started_at).toLocaleString('fr-FR')}</label>)}</div>}
         {mode === 'upload' && <><label className="visual-upload">PNG, JPEG ou WebP · 4 images maximum · 6 Mo par image
           <input aria-label="Captures à analyser" type="file" multiple accept="image/png,image/jpeg,image/webp"
             disabled={busy || !canEdit} onChange={e => setFiles(Array.from(e.target.files || []))} />
