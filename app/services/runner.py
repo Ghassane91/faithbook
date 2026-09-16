@@ -489,7 +489,7 @@ async def _attempt_once(
                 "- upload evite"
             )
 
-    # --- 3. Envoi vers Google Drive (optionnel) --------------------------
+    # --- 3. Envoi vers Google Drive ou S3 (backend principal, optionnel) --
     if settings.storage_backend not in ("google_drive", "s3"):
         log_step(
             session,
@@ -498,55 +498,87 @@ async def _attempt_once(
             f"Enregistré dans '{org_folder_name}/{folder_name}' : {destination}",
             attempt=attempt,
         )
-        return
-
-    run.drive_status = "pending"
-    session.commit()
-    log_step(
-        session,
-        run,
-        "drive",
-        "Préparation du dossier daté et de l'envoi reprenable",
-        attempt=attempt,
-    )
-    try:
-        run.drive_attempts = (run.drive_attempts or 0) + 1
-        placement = await asyncio.to_thread(
-            drive_sync.upload_capture,
-            destination,
-            target,
-            run.capture_date,
-            filename,
-        )
-        drive_sync.mark_success(run, placement)
-        session.commit()
-        log_step(
-            session,
-            run,
-            "upload",
-            (
-                "Fichier déjà présent sur Drive : "
-                if placement.upload.deduplicated
-                else "Envoyé sur Drive : "
-            )
-            + "/".join(placement.folders)
-            + f"/{filename}",
-            attempt=attempt,
-        )
-    except Exception as exc:  # noqa: BLE001
-        # La capture locale est réussie et ne doit pas être refaite. La tâche
-        # automatique Drive reprendra uniquement cet envoi avec backoff.
-        run.drive_attempts = max(0, (run.drive_attempts or 1) - 1)
-        drive_sync.mark_failure(run, exc)
+    else:
+        run.drive_status = "pending"
         session.commit()
         log_step(
             session,
             run,
             "drive",
-            f"Capture conservée localement ; envoi Drive à reprendre : {run.drive_last_error}",
-            level="ERROR",
+            "Préparation du dossier daté et de l'envoi reprenable",
             attempt=attempt,
         )
+        try:
+            run.drive_attempts = (run.drive_attempts or 0) + 1
+            placement = await asyncio.to_thread(
+                drive_sync.upload_capture,
+                destination,
+                target,
+                run.capture_date,
+                filename,
+            )
+            drive_sync.mark_success(run, placement)
+            session.commit()
+            log_step(
+                session,
+                run,
+                "upload",
+                (
+                    "Fichier déjà présent sur Drive : "
+                    if placement.upload.deduplicated
+                    else "Envoyé sur Drive : "
+                )
+                + "/".join(placement.folders)
+                + f"/{filename}",
+                attempt=attempt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # La capture locale est réussie et ne doit pas être refaite. La tâche
+            # automatique Drive reprendra uniquement cet envoi avec backoff.
+            run.drive_attempts = max(0, (run.drive_attempts or 1) - 1)
+            drive_sync.mark_failure(run, exc)
+            session.commit()
+            log_step(
+                session,
+                run,
+                "drive",
+                f"Capture conservée localement ; envoi Drive à reprendre : {run.drive_last_error}",
+                level="ERROR",
+                attempt=attempt,
+            )
+
+    # --- 3bis. Copie additionnelle vers Drive (independante du backend) ---
+    # N'existe que pour permettre une consultation facile (telephone,
+    # tablette) ; ne remplace jamais le backend principal ci-dessus et n'a
+    # aucune file de reprise dediee. STORAGE_BACKEND=google_drive envoie deja
+    # sur Drive ci-dessus : pas de deuxieme copie dans ce cas.
+    if settings.google_drive_dual_write_enabled and settings.storage_backend != "google_drive":
+        try:
+            extra = await asyncio.to_thread(
+                drive_sync.upload_capture_extra,
+                destination,
+                target,
+                run.capture_date,
+                filename,
+            )
+            log_step(
+                session,
+                run,
+                "drive_extra",
+                "Copie supplémentaire envoyée sur Drive : "
+                + "/".join(extra.folders)
+                + f"/{filename}",
+                attempt=attempt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_step(
+                session,
+                run,
+                "drive_extra",
+                f"Copie Drive supplémentaire échouée (capture conservée par ailleurs) : {exc}",
+                level="ERROR",
+                attempt=attempt,
+            )
 
 
 async def trigger_target(

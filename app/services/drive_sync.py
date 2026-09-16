@@ -77,6 +77,32 @@ def upload_capture(
     return DrivePlacement(upload=upload, folders=names)
 
 
+def upload_capture_extra(
+    path: Path,
+    target: Target,
+    capture_date: str,
+    filename: str | None = None,
+) -> DrivePlacement:
+    """Copie additionnelle best-effort vers Drive, independante de
+    STORAGE_BACKEND (voir GOOGLE_DRIVE_DUAL_WRITE_ENABLED). Contrairement a
+    upload_capture(), n'ecrit aucun etat en base (run.drive_*) : ces colonnes
+    restent la propriete du backend principal choisi par STORAGE_BACKEND.
+    Aucune file de reprise dediee ; un echec est seulement journalise, la
+    copie de reference (locale ou S3) n'est jamais affectee."""
+    if not drive_client.is_configured():
+        raise RuntimeError(
+            "Copie Drive additionnelle non configuree : GOOGLE_SERVICE_ACCOUNT_FILE "
+            "ou GOOGLE_DRIVE_PARENT_FOLDER_ID manquant."
+        )
+    names = folder_names(target, capture_date)
+    parent_id: str | None = None
+    for name in names:
+        parent_id = drive_client.ensure_folder(name, parent_id)
+    assert parent_id is not None
+    upload = drive_client.upload(path, parent_id, filename or path.name)
+    return DrivePlacement(upload=upload, folders=names)
+
+
 def mark_success(run: Run, placement: DrivePlacement) -> None:
     run.drive_folder_id = placement.upload.folder_id
     run.drive_file_id = placement.upload.file_id

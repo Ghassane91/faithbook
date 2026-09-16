@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     # Les captures locales dont l'envoi a échoué sont reprises automatiquement.
     google_drive_retry_minutes: int = 5
     google_drive_retry_batch_size: int = 20
+    # Copie additionnelle vers Drive, independante de STORAGE_BACKEND : la
+    # capture reste servie par le backend principal (local/S3/Backblaze) et
+    # une deuxieme copie best-effort part vers Drive pour consultation depuis
+    # un telephone/tablette. Aucun impact sur le backend principal si Drive
+    # est indisponible : l'echec est seulement journalise.
+    google_drive_dual_write_enabled: bool = False
 
     # -- Stockage compatible S3 (AWS S3, Backblaze B2, Wasabi, MinIO) -----
     # Laisser s3_endpoint_url vide pour AWS ; le renseigner pour tout autre
@@ -151,6 +157,30 @@ class Settings(BaseSettings):
     ollama_keep_alive: str = "5m"
     ollama_num_predict: int = 180
 
+    # --- Extraction structuree par IA (optionnelle, desactivee par defaut) ---
+    # Par defaut reprend ai_summary_provider (Anthropic ou Ollama) : une seule
+    # cle a gerer. extraction_provider permet de changer UNIQUEMENT le
+    # fournisseur de l extraction sans toucher a la synthese quotidienne des
+    # changements (ai_summary), qui reste sur son propre reglage.
+    # Valeurs : "" (reprend ai_summary_provider), "anthropic", "ollama", "deepseek".
+    extraction_enabled: bool = False
+    extraction_provider: str = ""
+    # Vide = reprend ai_summary_model (anthropic) ou deepseek_model (deepseek).
+    # L extraction tourne a chaque capture, la synthese une fois par jour : un
+    # modele plus leger est souvent suffisant.
+    extraction_model: str = ""
+    extraction_retries: int = 2
+    # Plafond de la reponse. Au-dela, le JSON est coupe et la page est ignoree
+    # avec une anomalie explicite plutot qu une lecture partielle silencieuse.
+    extraction_max_tokens: int = 4000
+
+    # DeepSeek : API compatible OpenAI, sans rapport avec Anthropic ni Ollama.
+    # Cle a obtenir sur platform.deepseek.com. Beaucoup moins cher que Claude
+    # sur du JSON structure, avec le meme garde-fou anti-invention en aval.
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+
     # --- Canaux d alerte complementaires (vides = inactifs) ---
     notify_telegram_bot_token: str = ""
     notify_telegram_chat_id: str = ""
@@ -179,6 +209,13 @@ class Settings(BaseSettings):
     # Capture
     default_viewport_width: int = 1440
     default_viewport_height: int = 900
+    # Force un seul ecran visible pour TOUTES les captures, quel que soit le
+    # reglage full_page de chaque cible (102 lignes en base, non modifiees).
+    # Une capture pleine page tres longue (ex. 1440x33000) est illisible dans
+    # n'importe quel visualiseur d'images, meme au zoom maximal : le contenu
+    # complet reste lu par l'extraction IA (texte de la page), pas par l'oeil
+    # humain sur l'image. Reversible en une ligne, sans migration.
+    capture_viewport_only: bool = False
     default_timeout_ms: int = 45000
     default_wait_after_load_ms: int = 2000
     default_user_agent: str = ""

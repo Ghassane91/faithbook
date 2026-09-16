@@ -541,6 +541,7 @@ async def _capture_page_impl(
 
     width = target.viewport_width or settings.default_viewport_width
     height = target.viewport_height or settings.default_viewport_height
+    full_page_effectif = target.full_page and not getattr(settings, "capture_viewport_only", False)
     timeout = target.timeout_ms or settings.default_timeout_ms
     wait_after = (
         target.wait_after_load_ms
@@ -691,7 +692,7 @@ async def _capture_page_impl(
             screenshot_written = False
             # Règle générale : une capture pleine page charge d'abord les
             # contenus différés en descendant progressivement.
-            if target.full_page and settings.auto_scroll_full_page:
+            if full_page_effectif and settings.auto_scroll_full_page:
                 if requires_stitched_capture(page.url):
                     scroll_steps, document_height = await capture_stitched_page(
                         page,
@@ -716,7 +717,7 @@ async def _capture_page_impl(
             except Exception:  # noqa: BLE001
                 metrics = None
             if not screenshot_written:
-                await page.screenshot(path=str(destination), full_page=target.full_page, type="jpeg", quality=75)
+                await page.screenshot(path=str(destination), full_page=full_page_effectif, type="jpeg", quality=75)
             guard.raise_if_blocked()
         finally:
             if account_profile_slug:

@@ -75,9 +75,12 @@ class DriveClient:
 
     # -- infra -------------------------------------------------------------
     def is_configured(self) -> bool:
+        # Ne depend plus de STORAGE_BACKEND : ce client sert aussi bien le
+        # backend principal (STORAGE_BACKEND=google_drive) que la copie
+        # additionnelle optionnelle (GOOGLE_DRIVE_DUAL_WRITE_ENABLED), qui
+        # peut etre active alors que le backend principal est local ou S3.
         return (
-            settings.storage_backend == "google_drive"
-            and bool(settings.google_drive_parent_folder_id)
+            bool(settings.google_drive_parent_folder_id)
             and Path(settings.google_service_account_file).is_file()
         )
 
