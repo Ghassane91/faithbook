@@ -4,7 +4,9 @@ import unittest
 from app.services.extraction import (
     Champ, Regle, analyser_reponse, construire_invite,
     convertir_nombre, convertir_booleen, convertir_date,
+    _fournisseur, _modele, _modele_deepseek, is_configured,
 )
+from app.config import settings
 
 CATALOGUE = Regle(
     nom="catalogue-cameras",
@@ -95,9 +97,11 @@ class Analyse(unittest.TestCase):
     def test_valeur_inventee_ecartee(self):
         reponse = '{"lignes":[{"modele":"Spypoint Flex-XXL 4K","prix":"299.00"}]}'
         r = analyser_reponse(CATALOGUE, reponse, PAGE)
-        self.assertIsNone(r.lignes[0]["modele"])
+        # La ligne entiere est ecartee : sans modele, le prix n a aucun sens
+        # et une ligne inventee ne doit pas survivre a la perte de son nom.
+        self.assertEqual(r.lignes, [])
         self.assertTrue(any("absent du texte source" in a for a in r.anomalies))
-        self.assertTrue(any("obligatoire et absent" in a for a in r.anomalies))
+        self.assertTrue(any("Ligne 1 ecartee" in a for a in r.anomalies))
 
     def test_balises_de_code_tolerees(self):
         r = analyser_reponse(CATALOGUE, '```json\n{"lignes":[{"modele":"Spypoint Flex-M"}]}\n```', PAGE)
@@ -133,6 +137,59 @@ class Analyse(unittest.TestCase):
     def test_sans_source_pas_de_verification(self):
         r = analyser_reponse(CATALOGUE, '{"lignes":[{"modele":"Modele inconnu"}]}', "")
         self.assertEqual(r.lignes[0]["modele"], "Modele inconnu")
+
+
+class TestFournisseur(unittest.TestCase):
+    """extraction_provider doit pouvoir devier de ai_summary_provider sans
+    jamais l'affecter en retour : la synthese quotidienne reste inchangee."""
+
+    def setUp(self):
+        self._sauve = (
+            settings.extraction_provider,
+            settings.deepseek_api_key,
+            settings.extraction_model,
+            settings.ai_summary_provider,
+        )
+
+    def tearDown(self):
+        (
+            settings.extraction_provider,
+            settings.deepseek_api_key,
+            settings.extraction_model,
+            settings.ai_summary_provider,
+        ) = self._sauve
+
+    def test_vide_reprend_ai_summary_provider(self):
+        settings.extraction_provider = ""
+        settings.ai_summary_provider = "anthropic"
+        self.assertEqual(_fournisseur(), "anthropic")
+
+    def test_deepseek_surcharge_sans_toucher_ai_summary(self):
+        settings.extraction_provider = "deepseek"
+        settings.ai_summary_provider = "anthropic"
+        self.assertEqual(_fournisseur(), "deepseek")
+        # La synthese quotidienne (ai_summary.py) lit ai_summary_provider
+        # directement : elle doit rester sur anthropic, intacte.
+        self.assertEqual(settings.ai_summary_provider, "anthropic")
+
+    def test_modele_deepseek_par_defaut(self):
+        settings.extraction_model = ""
+        settings.deepseek_model = "deepseek-chat"
+        self.assertEqual(_modele_deepseek(), "deepseek-chat")
+
+    def test_modele_deepseek_surcharge(self):
+        settings.extraction_model = "deepseek-reasoner"
+        self.assertEqual(_modele_deepseek(), "deepseek-reasoner")
+
+    def test_is_configured_deepseek_sans_cle(self):
+        settings.extraction_provider = "deepseek"
+        settings.deepseek_api_key = ""
+        self.assertFalse(is_configured())
+
+    def test_is_configured_deepseek_avec_cle(self):
+        settings.extraction_provider = "deepseek"
+        settings.deepseek_api_key = "sk-factice"
+        self.assertTrue(is_configured())
 
 
 if __name__ == "__main__":

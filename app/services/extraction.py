@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -85,21 +87,40 @@ INSTRUCTIONS = (
 )
 
 
+def _fournisseur() -> str:
+    """Fournisseur de l extraction : dedie, sinon celui de la synthese.
+
+    extraction_provider permet de changer UNIQUEMENT l extraction (par
+    exemple vers DeepSeek) sans toucher a ai_summary_provider, qui continue
+    a piloter la synthese quotidienne des changements.
+    """
+    return getattr(settings, "extraction_provider", "") or settings.ai_summary_provider
+
+
 def is_configured() -> bool:
     if not getattr(settings, "extraction_enabled", False):
         return False
-    if settings.ai_summary_provider == "ollama":
+    fournisseur = _fournisseur()
+    if fournisseur == "ollama":
         return bool(settings.ollama_base_url.strip() and settings.ollama_model.strip())
+    if fournisseur == "deepseek":
+        return bool(getattr(settings, "deepseek_api_key", "") and _modele_deepseek().strip())
     return bool(settings.anthropic_api_key and _modele().strip())
 
 
 def _modele() -> str:
-    """Modele dedie a l extraction, sinon celui de la synthese.
+    """Modele Anthropic dedie a l extraction, sinon celui de la synthese.
 
     L extraction tourne a chaque capture ; la synthese une fois par jour. Il est
     normal de vouloir un modele plus leger pour la premiere.
     """
     return getattr(settings, "extraction_model", "") or settings.ai_summary_model
+
+
+def _modele_deepseek() -> str:
+    return getattr(settings, "extraction_model", "") or getattr(
+        settings, "deepseek_model", "deepseek-chat"
+    )
 
 
 def construire_invite(regle: Regle, texte: str, titre: str | None, url: str | None) -> tuple[str, bool]:
@@ -260,6 +281,7 @@ def analyser_reponse(regle: Regle, texte: str, source: str = "") -> Extraction:
         for inconnu in set(entree) - connus:
             resultat.anomalies.append(f"Ligne {index} : champ inattendu '{inconnu}' ignore.")
         ligne: dict[str, Any] = {}
+        manquants: list[str] = []
         for champ in regle.champs:
             valeur = entree.get(champ.nom)
             if isinstance(valeur, str) and not valeur.strip():
@@ -295,9 +317,17 @@ def analyser_reponse(regle: Regle, texte: str, source: str = "") -> Extraction:
                 )
                 valeur = None
             if valeur is None and champ.obligatoire:
-                resultat.anomalies.append(f"Ligne {index} : '{champ.nom}' obligatoire et absent.")
+                # Une ligne sans son champ obligatoire est inexploitable : la
+                # garder ferait entrer un prix sans produit dans l export, ou
+                # pire, une ligne inventee dont seul le nom a ete ecarte.
+                manquants.append(champ.nom)
             ligne[champ.nom] = valeur
-        if any(v is not None for v in ligne.values()):
+        if manquants:
+            resultat.anomalies.append(
+                "Ligne %d ecartee : %s obligatoire et absent du texte source."
+                % (index, ", ".join("'%s'" % m for m in manquants))
+            )
+        elif any(v is not None for v in ligne.values()):
             resultat.lignes.append(ligne)
         else:
             resultat.anomalies.append(f"Ligne {index} ignoree : entierement vide.")
@@ -306,3 +336,152 @@ def analyser_reponse(regle: Regle, texte: str, source: str = "") -> Extraction:
     if reste > 0:
         resultat.anomalies.append(f"{reste} ligne(s) au-dela de la limite de {regle.max_lignes}, ignorees.")
     return resultat
+
+
+# --------------------------------------------------------------- appel du modele
+
+_client = None
+_client_lock = threading.Lock()
+
+
+def _get_client():
+    """Client Anthropic cree a la demande, comme dans ai_summary."""
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                if not is_configured():
+                    raise ExtractionIndisponible("Extraction non configuree.")
+                import anthropic
+
+                _client = anthropic.Anthropic(
+                    api_key=settings.anthropic_api_key,
+                    max_retries=getattr(settings, "extraction_retries", 2),
+                )
+    return _client
+
+
+def _appeler_anthropic(invite: str) -> str:
+    client = _get_client()
+    reponse = client.messages.create(
+        model=_modele(),
+        max_tokens=getattr(settings, "extraction_max_tokens", 4000),
+        temperature=0,
+        system=INSTRUCTIONS,
+        messages=[
+            {"role": "user", "content": invite},
+            # Prefixe impose : force le modele a commencer par du JSON et evite
+            # les preambules du type « Voici les informations extraites ».
+            {"role": "assistant", "content": "{"},
+        ],
+    )
+    arret = getattr(reponse, "stop_reason", None)
+    if arret == "refusal":
+        raise ExtractionIndisponible("Extraction refusee par le modele.")
+    if arret == "max_tokens":
+        # Le JSON est coupe en plein milieu : inutile d essayer de le lire.
+        # Reduire regle.max_lignes ou augmenter EXTRACTION_MAX_TOKENS.
+        raise ExtractionIndisponible(
+            "Reponse tronquee a %d jetons : reduire le nombre de lignes demande."
+            % getattr(settings, "extraction_max_tokens", 4000)
+        )
+    morceaux = [b.text for b in reponse.content if getattr(b, "type", None) == "text"]
+    return "{" + "".join(morceaux)
+
+
+def _appeler_ollama(invite: str) -> str:
+    import httpx
+
+    base_url = settings.ollama_base_url.rstrip("/")
+    charge = {
+        "model": settings.ollama_model,
+        "stream": False,
+        "format": "json",
+        "keep_alive": settings.ollama_keep_alive,
+        "messages": [
+            {"role": "system", "content": INSTRUCTIONS},
+            {"role": "user", "content": invite},
+        ],
+        "options": {"temperature": 0},
+    }
+    # trust_env=False : le worker a un proxy sortant pour Chromium, une adresse
+    # locale ne doit jamais y passer.
+    with httpx.Client(timeout=settings.ollama_timeout_seconds, trust_env=False) as client:
+        reponse = client.post(f"{base_url}/api/chat", json=charge)
+        reponse.raise_for_status()
+    return str((reponse.json().get("message") or {}).get("content") or "")
+
+
+def _appeler_deepseek(invite: str) -> str:
+    """API compatible OpenAI (chat/completions). Sans rapport avec Anthropic
+    ni Ollama : cle et URL de base propres, voir DEEPSEEK_* dans .env.
+    """
+    import httpx
+
+    cle = getattr(settings, "deepseek_api_key", "")
+    if not cle:
+        raise ExtractionIndisponible("DEEPSEEK_API_KEY absente.")
+    base_url = getattr(settings, "deepseek_base_url", "https://api.deepseek.com").rstrip("/")
+    charge = {
+        "model": _modele_deepseek(),
+        "temperature": 0,
+        # Force une reponse JSON valide, sans le bricolage de prefixe utilise
+        # pour Anthropic : DeepSeek le fait nativement.
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": INSTRUCTIONS},
+            {"role": "user", "content": invite},
+        ],
+    }
+    entetes = {"Authorization": f"Bearer {cle}"}
+    with httpx.Client(timeout=60, trust_env=False) as client:
+        reponse = client.post(f"{base_url}/chat/completions", json=charge, headers=entetes)
+        reponse.raise_for_status()
+    corps = reponse.json()
+    choix = (corps.get("choices") or [{}])[0]
+    return str((choix.get("message") or {}).get("content") or "")
+
+
+def extraire(
+    regle: Regle,
+    texte: str,
+    titre: str | None = None,
+    url: str | None = None,
+) -> Extraction | None:
+    """Extraction complete : invite, appel, validation.
+
+    Renvoie None si l extraction n est pas configuree ou si le fournisseur est
+    en panne. Comme pour la synthese, une indisponibilite ne doit jamais faire
+    echouer une capture.
+    """
+    if not is_configured() or not (texte or "").strip():
+        return None
+    try:
+        invite, tronque = construire_invite(regle, texte, titre, url)
+        debut = time.monotonic()
+        fournisseur = _fournisseur()
+        if fournisseur == "ollama":
+            brut = _appeler_ollama(invite)
+        elif fournisseur == "deepseek":
+            brut = _appeler_deepseek(invite)
+        else:
+            brut = _appeler_anthropic(invite)
+        resultat = analyser_reponse(regle, brut, texte)
+        resultat.tronque = tronque
+        if tronque:
+            resultat.anomalies.append(
+                "Texte de la page tronque a %d caracteres : des elements en bas de page "
+                "ont pu etre ignores." % MAX_CARACTERES
+            )
+        logger.info(
+            "Extraction %s : %d ligne(s), %d anomalie(s), %.1f s",
+            regle.nom, len(resultat.lignes), len(resultat.anomalies),
+            time.monotonic() - debut,
+        )
+        return resultat
+    except Exception as exc:  # noqa: BLE001 - jamais bloquant pour la capture
+        logger.warning(
+            "Extraction indisponible (regle=%s, fournisseur=%s) : %s",
+            regle.nom, _fournisseur(), exc,
+        )
+        return None
