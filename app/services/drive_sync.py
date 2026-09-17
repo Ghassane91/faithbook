@@ -48,6 +48,44 @@ def folder_names(target: Target, capture_date: str) -> tuple[str, ...]:
     return tuple(names)
 
 
+def nom_dossier_organisation(target: Target, organization_label: str | None) -> str:
+    """Nom lisible de l'organisation pour Drive.
+
+    organization_folder() reste reserve au stockage local et a S3, ou le nom
+    technique "organization-<id>" garantit l'etancheite entre locataires. Sur
+    Drive, le dossier est lu par un humain : on y met le nom reel, et on ne
+    retombe sur le nom technique que si l'appelant n'a pas pu le fournir.
+    """
+    libelle = " ".join((organization_label or "").split())
+    if not libelle:
+        return organization_folder(target)
+    # La barre oblique est le seul caractere a bannir : elle donnerait
+    # l'illusion d'un sous-dossier supplementaire dans les chemins affiches.
+    return libelle.replace("/", "-")[:80]
+
+
+def drive_folder_names(
+    target: Target,
+    capture_date: str,
+    organization_label: str | None = None,
+) -> tuple[str, ...]:
+    """Arborescence Drive : organisation / site / [sous-dossier] / date.
+
+    Volontairement differente de folder_names(), qui place la date en tete :
+    cet ordre-la eparpille l'historique d'une meme page sur un dossier par
+    jour. Ici la cible prime, donc toutes ses captures restent groupees et
+    l'evolution se lit d'un coup d'oeil.
+    """
+    names = [
+        nom_dossier_organisation(target, organization_label),
+        site_label(target.url),
+    ]
+    if target.subfolder:
+        names.append(slugify(target.subfolder))
+    names.append(date_folder_name(capture_date))
+    return tuple(names)
+
+
 def _client():
     """Client de stockage distant choisi par STORAGE_BACKEND."""
     if settings.storage_backend == "s3":
@@ -82,6 +120,7 @@ def upload_capture_extra(
     target: Target,
     capture_date: str,
     filename: str | None = None,
+    organization_label: str | None = None,
 ) -> DrivePlacement:
     """Copie additionnelle best-effort vers Drive, independante de
     STORAGE_BACKEND (voir GOOGLE_DRIVE_DUAL_WRITE_ENABLED). Contrairement a
@@ -94,7 +133,12 @@ def upload_capture_extra(
             "Copie Drive additionnelle non configuree : GOOGLE_SERVICE_ACCOUNT_FILE "
             "ou GOOGLE_DRIVE_PARENT_FOLDER_ID manquant."
         )
-    names = folder_names(target, capture_date)
+    # Aucun dossier n'est cree tant qu'il n'y a rien a y mettre : une capture
+    # absente ou vide laissait jusqu'ici une arborescence de dossiers vides
+    # derriere elle.
+    if not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError(f"Capture introuvable ou vide, rien a envoyer sur Drive : {path}")
+    names = drive_folder_names(target, capture_date, organization_label)
     parent_id: str | None = None
     for name in names:
         parent_id = drive_client.ensure_folder(name, parent_id)

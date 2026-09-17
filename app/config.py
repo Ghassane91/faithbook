@@ -216,6 +216,11 @@ class Settings(BaseSettings):
     # complet reste lu par l'extraction IA (texte de la page), pas par l'oeil
     # humain sur l'image. Reversible en une ligne, sans migration.
     capture_viewport_only: bool = False
+    # Produit, a cote de la capture pleine page, un PDF d'une page par ecran.
+    # La capture pleine page reste la reference ; le PDF n'existe que pour
+    # etre lu par un humain (ordinateur ou telephone), la ou un ruban de
+    # plusieurs milliers de pixels de haut est inexploitable.
+    capture_pdf_pages: bool = False
     default_timeout_ms: int = 45000
     default_wait_after_load_ms: int = 2000
     default_user_agent: str = ""

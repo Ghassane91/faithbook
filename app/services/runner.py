@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,8 +14,18 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import session_scope
-from app.models import Account, AccountStatus, Run, RunLog, RunStatus, Target, TriggerType, utcnow
-from app.services import crypto, drive_sync, quotas, run_queue
+from app.models import (
+    Account,
+    AccountStatus,
+    Organization,
+    Run,
+    RunLog,
+    RunStatus,
+    Target,
+    TriggerType,
+    utcnow,
+)
+from app.services import crypto, drive_sync, pagination, quotas, run_queue
 from app.services import ai_summary
 from app.services.capture import (
     SessionExpired,
@@ -554,12 +566,18 @@ async def _attempt_once(
     # sur Drive ci-dessus : pas de deuxieme copie dans ce cas.
     if settings.google_drive_dual_write_enabled and settings.storage_backend != "google_drive":
         try:
+            organisation = (
+                session.get(Organization, target.organization_id)
+                if target.organization_id is not None
+                else None
+            )
             extra = await asyncio.to_thread(
                 drive_sync.upload_capture_extra,
                 destination,
                 target,
                 run.capture_date,
                 filename,
+                organisation.name if organisation is not None else None,
             )
             log_step(
                 session,
@@ -570,6 +588,9 @@ async def _attempt_once(
                 + f"/{filename}",
                 attempt=attempt,
             )
+            await _envoyer_pdf_par_ecran(
+                session, run, target, destination, filename, attempt, organisation
+            )
         except Exception as exc:  # noqa: BLE001
             log_step(
                 session,
@@ -579,6 +600,62 @@ async def _attempt_once(
                 level="ERROR",
                 attempt=attempt,
             )
+
+
+async def _envoyer_pdf_par_ecran(
+    session: Session,
+    run: Run,
+    target: Target,
+    capture: Path,
+    filename: str,
+    attempt: int,
+    organisation: Organization | None,
+) -> None:
+    """Depose sur Drive, a cote de la capture, un PDF d'une page par ecran.
+
+    Strictement best-effort et sans effet sur le reste : la capture de
+    reference est deja envoyee quand cette fonction est appelee, et un echec
+    ici ne fait que produire une ligne de journal.
+    """
+    if not settings.capture_pdf_pages:
+        return
+    dossier_temporaire = Path(tempfile.mkdtemp(prefix="faithbook-pdf-"))
+    try:
+        pdf = dossier_temporaire / (Path(filename).stem + ".pdf")
+        pages = await asyncio.to_thread(
+            pagination.pdf_par_ecran,
+            capture,
+            settings.default_viewport_height,
+            pdf,
+        )
+        if pages is None:
+            return  # La capture tient sur un ecran : le PDF n'apporterait rien.
+        await asyncio.to_thread(
+            drive_sync.upload_capture_extra,
+            pdf,
+            target,
+            run.capture_date,
+            pdf.name,
+            organisation.name if organisation is not None else None,
+        )
+        log_step(
+            session,
+            run,
+            "drive_extra",
+            f"PDF lisible envoyé sur Drive ({pages} pages) : {pdf.name}",
+            attempt=attempt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log_step(
+            session,
+            run,
+            "drive_extra",
+            f"PDF lisible non généré (capture inchangée) : {exc}",
+            level="ERROR",
+            attempt=attempt,
+        )
+    finally:
+        shutil.rmtree(dossier_temporaire, ignore_errors=True)
 
 
 async def trigger_target(
