@@ -126,6 +126,15 @@ class Settings(BaseSettings):
     # un telephone/tablette. Aucun impact sur le backend principal si Drive
     # est indisponible : l'echec est seulement journalise.
     google_drive_dual_write_enabled: bool = False
+    # Arborescence de la copie Drive, independante du backend principal :
+    #   "plat"    : tout dans le dossier parent. Le nom de fichier porte deja
+    #               le site et l'horodatage, donc rien n'est perdu, et une
+    #               journee entiere se parcourt d'un seul coup d'oeil.
+    #   "date"    : un dossier par jour.
+    #   "complet" : organisation / site / [sous-dossier] / date. Precis, mais
+    #               avec plusieurs dizaines de cibles chaque capture se
+    #               retrouve seule dans son dossier.
+    google_drive_structure: Literal["plat", "date", "complet"] = "complet"
 
     # -- Stockage compatible S3 (AWS S3, Backblaze B2, Wasabi, MinIO) -----
     # Laisser s3_endpoint_url vide pour AWS ; le renseigner pour tout autre

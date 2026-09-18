@@ -69,13 +69,19 @@ def drive_folder_names(
     capture_date: str,
     organization_label: str | None = None,
 ) -> tuple[str, ...]:
-    """Arborescence Drive : organisation / site / [sous-dossier] / date.
+    """Arborescence de la copie Drive, selon GOOGLE_DRIVE_STRUCTURE.
 
-    Volontairement differente de folder_names(), qui place la date en tete :
-    cet ordre-la eparpille l'historique d'une meme page sur un dossier par
-    jour. Ici la cible prime, donc toutes ses captures restent groupees et
-    l'evolution se lit d'un coup d'oeil.
+    Renvoie un tuple vide en mode "plat" : le fichier va alors directement
+    dans le dossier parent. Le nom de fichier portant deja le site et
+    l'horodatage, l'arborescence n'ajoute de l'information que si l'on veut
+    naviguer par cible ; avec plusieurs dizaines de cibles, elle isole au
+    contraire chaque capture dans un dossier a elle seule.
     """
+    structure = settings.google_drive_structure
+    if structure == "plat":
+        return ()
+    if structure == "date":
+        return (date_folder_name(capture_date),)
     names = [
         nom_dossier_organisation(target, organization_label),
         site_label(target.url),
@@ -139,7 +145,9 @@ def upload_capture_extra(
     if not path.is_file() or path.stat().st_size == 0:
         raise RuntimeError(f"Capture introuvable ou vide, rien a envoyer sur Drive : {path}")
     names = drive_folder_names(target, capture_date, organization_label)
-    parent_id: str | None = None
+    # En mode plat, names est vide : on depose directement dans le dossier
+    # parent configure, sans creer le moindre sous-dossier.
+    parent_id: str | None = settings.google_drive_parent_folder_id or None
     for name in names:
         parent_id = drive_client.ensure_folder(name, parent_id)
     assert parent_id is not None
