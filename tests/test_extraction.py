@@ -149,6 +149,7 @@ class TestFournisseur(unittest.TestCase):
             settings.deepseek_api_key,
             settings.extraction_model,
             settings.ai_summary_provider,
+            settings.extraction_enabled,
         )
 
     def tearDown(self):
@@ -157,6 +158,7 @@ class TestFournisseur(unittest.TestCase):
             settings.deepseek_api_key,
             settings.extraction_model,
             settings.ai_summary_provider,
+            settings.extraction_enabled,
         ) = self._sauve
 
     def test_vide_reprend_ai_summary_provider(self):
@@ -182,14 +184,26 @@ class TestFournisseur(unittest.TestCase):
         self.assertEqual(_modele_deepseek(), "deepseek-reasoner")
 
     def test_is_configured_deepseek_sans_cle(self):
+        # extraction_enabled est explicite : sans lui, is_configured() renvoie
+        # False quelle que soit la cle, et le test ne prouverait rien.
+        settings.extraction_enabled = True
         settings.extraction_provider = "deepseek"
         settings.deepseek_api_key = ""
         self.assertFalse(is_configured())
 
     def test_is_configured_deepseek_avec_cle(self):
+        settings.extraction_enabled = True
         settings.extraction_provider = "deepseek"
         settings.deepseek_api_key = "sk-factice"
         self.assertTrue(is_configured())
+
+    def test_is_configured_faux_si_extraction_desactivee(self):
+        # Le grand interrupteur prime sur tout le reste : une cle valide ne
+        # suffit pas a activer l'extraction.
+        settings.extraction_enabled = False
+        settings.extraction_provider = "deepseek"
+        settings.deepseek_api_key = "sk-factice"
+        self.assertFalse(is_configured())
 
 
 if __name__ == "__main__":
