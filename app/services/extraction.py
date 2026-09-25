@@ -91,7 +91,7 @@ def _fournisseur() -> str:
     """Fournisseur de l extraction : dedie, sinon celui de la synthese.
 
     extraction_provider permet de changer UNIQUEMENT l extraction (par
-    exemple vers DeepSeek) sans toucher a ai_summary_provider, qui continue
+    exemple vers Gemini) sans toucher a ai_summary_provider, qui continue
     a piloter la synthese quotidienne des changements.
     """
     return getattr(settings, "extraction_provider", "") or settings.ai_summary_provider
@@ -105,6 +105,8 @@ def is_configured() -> bool:
         return bool(settings.ollama_base_url.strip() and settings.ollama_model.strip())
     if fournisseur == "deepseek":
         return bool(getattr(settings, "deepseek_api_key", "") and _modele_deepseek().strip())
+    if fournisseur == "gemini":
+        return bool(getattr(settings, "gemini_api_key", "") and _modele_gemini().strip())
     return bool(settings.anthropic_api_key and _modele().strip())
 
 
@@ -120,6 +122,12 @@ def _modele() -> str:
 def _modele_deepseek() -> str:
     return getattr(settings, "extraction_model", "") or getattr(
         settings, "deepseek_model", "deepseek-chat"
+    )
+
+
+def _modele_gemini() -> str:
+    return getattr(settings, "extraction_model", "") or getattr(
+        settings, "gemini_model", "gemini-2.5-flash"
     )
 
 
@@ -442,6 +450,106 @@ def _appeler_deepseek(invite: str) -> str:
     return str((choix.get("message") or {}).get("content") or "")
 
 
+# Codes pour lesquels une nouvelle tentative a du sens : quota minute
+# depasse (429) et surcharges passageres cote Google (500, 503).
+_GEMINI_REESSAYABLES = {429, 500, 503}
+
+
+def _attentes_gemini() -> list[float]:
+    brut = str(getattr(settings, "gemini_retry_delays", "5,15") or "")
+    attentes = []
+    for morceau in brut.split(","):
+        try:
+            attentes.append(max(0.0, float(morceau.strip())))
+        except ValueError:
+            continue
+    return attentes
+
+
+def _charge_gemini(invite: str) -> dict[str, Any]:
+    """Corps de la requete generateContent. Isole pour etre testable."""
+    modele = _modele_gemini()
+    generation: dict[str, Any] = {
+        "temperature": 0,
+        # JSON natif : Gemini garantit un document JSON valide en sortie.
+        "responseMimeType": "application/json",
+        "maxOutputTokens": getattr(settings, "extraction_max_tokens", 4000),
+    }
+    if modele.startswith("gemini-2.5-flash"):
+        # La reflexion interne consomme le plafond de sortie et le quota
+        # gratuit sans rien apporter a une simple recopie de valeurs.
+        generation["thinkingConfig"] = {"thinkingBudget": 0}
+    return {
+        "systemInstruction": {"parts": [{"text": INSTRUCTIONS}]},
+        "contents": [{"role": "user", "parts": [{"text": invite}]}],
+        "generationConfig": generation,
+    }
+
+
+def _lire_reponse_gemini(corps: dict[str, Any]) -> str:
+    """Texte de la premiere reponse, ou erreur explicite."""
+    blocage = (corps.get("promptFeedback") or {}).get("blockReason")
+    if blocage:
+        raise ExtractionIndisponible(f"Requete bloquee par Gemini ({blocage}).")
+    candidats = corps.get("candidates") or []
+    if not candidats:
+        raise ExtractionIndisponible("Gemini n'a renvoye aucune reponse.")
+    candidat = candidats[0]
+    fin = candidat.get("finishReason")
+    if fin == "MAX_TOKENS":
+        raise ExtractionIndisponible(
+            "Reponse tronquee a %d jetons : reduire le nombre de lignes demande."
+            % getattr(settings, "extraction_max_tokens", 4000)
+        )
+    if fin in {"SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"}:
+        raise ExtractionIndisponible(f"Reponse refusee par Gemini ({fin}).")
+    parties = (candidat.get("content") or {}).get("parts") or []
+    # Les parties « thought » (reflexion) ne font pas partie de la reponse.
+    return "".join(str(p.get("text") or "") for p in parties if not p.get("thought"))
+
+
+def _appeler_gemini(invite: str) -> str:
+    """API native Gemini (generateContent), cle dans l en-tete x-goog-api-key.
+
+    La cle ne passe jamais dans l URL : elle finirait dans les journaux.
+    """
+    import httpx
+
+    cle = getattr(settings, "gemini_api_key", "")
+    if not cle:
+        raise ExtractionIndisponible("GEMINI_API_KEY absente.")
+    base_url = getattr(
+        settings, "gemini_base_url", "https://generativelanguage.googleapis.com/v1beta"
+    ).rstrip("/")
+    adresse = f"{base_url}/models/{_modele_gemini()}:generateContent"
+    entetes = {"x-goog-api-key": cle, "Content-Type": "application/json"}
+    charge = _charge_gemini(invite)
+    attentes = _attentes_gemini()
+    delai = getattr(settings, "gemini_timeout_seconds", 90)
+
+    with httpx.Client(timeout=delai, trust_env=False) as client:
+        for tentative in range(len(attentes) + 1):
+            reponse = client.post(adresse, json=charge, headers=entetes)
+            if reponse.status_code in _GEMINI_REESSAYABLES and tentative < len(attentes):
+                logger.info(
+                    "Gemini HTTP %d, nouvelle tentative dans %.0f s",
+                    reponse.status_code, attentes[tentative],
+                )
+                time.sleep(attentes[tentative])
+                continue
+            if reponse.status_code >= 400:
+                # Message d erreur de Google, sans jamais recopier la cle.
+                try:
+                    detail = (reponse.json().get("error") or {}).get("message", "")
+                except ValueError:
+                    detail = reponse.text[:200]
+                raise ExtractionIndisponible(
+                    f"Gemini HTTP {reponse.status_code} : {detail}".strip()
+                )
+            return _lire_reponse_gemini(reponse.json())
+    raise ExtractionIndisponible("Gemini indisponible apres plusieurs tentatives.")
+
+
 def extraire(
     regle: Regle,
     texte: str,
@@ -464,6 +572,8 @@ def extraire(
             brut = _appeler_ollama(invite)
         elif fournisseur == "deepseek":
             brut = _appeler_deepseek(invite)
+        elif fournisseur == "gemini":
+            brut = _appeler_gemini(invite)
         else:
             brut = _appeler_anthropic(invite)
         resultat = analyser_reponse(regle, brut, texte)

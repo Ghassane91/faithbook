@@ -52,17 +52,23 @@ Trois règles, dérivées de vos 102 cibles réelles. Chacune définit ce qu'est
 
 ---
 
-## Ce que je ne peux pas décider à votre place
+## Décisions prises (septembre 2026)
 
-| Point | Pourquoi |
+| Point | Décision |
 |---|---|
-| **Les descriptions exactes** | « Prendre le prix courant, pas le barré » est mon hypothèse. Sur une page de promotion, c'est peut-être l'inverse qui vous intéresse. |
-| **Le seuil d'alerte sur variation de prix** | 5 % ? 10 % ? Toute variation ? |
-| **La devise de référence** | Convertit-on tout en dirhams, ou garde-t-on la devise d'origine ? Une conversion suppose un taux, donc une source de taux et une date. |
-| **Les cibles concernées** | Les 102, ou un sous-ensemble pour commencer ? Je recommande de démarrer sur cinq catalogues. |
+| Prix courant et prix barré | Deux champs distincts (`prix`, `prix_barre`), alertes séparées |
+| Seuil d'alerte | Toute variation de prix, sans seuil |
+| Devise | Celle de la page, jamais convertie |
+| Cibles concernées | Toutes les cibles étiquetées |
+| Fournisseur | Gemini, offre gratuite, modèle `gemini-2.5-flash` (API native) |
 
----
+## Choix de la règle selon les étiquettes
 
-## Prochaine étape
+| Étiquette | Règle |
+|---|---|
+| `tarifs` | Règle 2 (prioritaire) |
+| `catalogue`, `catalogue-2`, `revendeur` | Règle 1 |
+| `editorial`, `actualites`, `accueil` | Règle 3 |
+| `support`, sans étiquette | Aucune extraction |
 
-Donnez-moi une page réelle et je teste la règle 1 dessus, sur une capture déjà en base. Vous verrez les lignes extraites et les anomalies avant qu'on généralise.
+Code : `app/services/regles_extraction.py`. La règle 3 porte désormais sur les annonces mises en avant sur la page ; la nouveauté est détectée par comparaison avec la capture précédente, pas par le modèle.

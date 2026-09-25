@@ -26,7 +26,7 @@ from app.models import (
     utcnow,
 )
 from app.services import crypto, drive_sync, pagination, quotas, run_queue
-from app.services import ai_summary
+from app.services import ai_summary, extraction_diff, extraction_store
 from app.services.capture import (
     SessionExpired,
     build_filename,
@@ -41,7 +41,12 @@ from app.services.capture import (
     text_change_ratio,
     thumb_path,
 )
-from app.services.notify import notify_change, notify_failure, notify_session_suspended
+from app.services.notify import (
+    notify_change,
+    notify_extraction,
+    notify_failure,
+    notify_session_suspended,
+)
 from app.services.session_check import encrypted_state_to_storage
 from app.services.ssrf import UrlRejected
 
@@ -309,6 +314,35 @@ async def _resume_ia(
     )
 
 
+async def _alertes_extraction(session: Session, run: Run, target: Target, pe, attempt: int) -> None:
+    """Compare avec l extraction precedente et alerte en un seul message.
+
+    Premiere extraction d une cible : sert de reference, aucune alerte.
+    Page identique (reprise) : rien ne peut avoir change.
+    """
+    try:
+        if pe.reprise:
+            return
+        avant = extraction_store.precedente(session, target.id, run.id)
+        if avant is None or avant.regle != pe.regle:
+            return
+        evenements = extraction_diff.comparer(
+            pe.regle, extraction_store.lignes(avant), extraction_store.lignes(pe)
+        )
+        if not evenements:
+            return
+        log_step(
+            session, run, "extraction",
+            f"{len(evenements)} changement(s) : "
+            + " ; ".join(f"{e.ligne} {e.detail}" for e in evenements[:5])[:900],
+            attempt=attempt,
+        )
+        if settings.extraction_alerts_enabled:
+            await asyncio.to_thread(notify_extraction, target, run, evenements)
+    except Exception:  # noqa: BLE001 - une alerte ne casse jamais une capture
+        logger.warning("Comparaison des extractions impossible (run=%s)", run.id, exc_info=True)
+
+
 def _elapsed_ms(run: Run) -> int:
     end = run.finished_at or utcnow()
     start = run.started_at
@@ -477,6 +511,15 @@ async def _attempt_once(
             else:
                 log_step(session, run, "diff",
                          f"Page inchangée ({pct} % de différence)", attempt=attempt)
+
+    # --- 1ter. Extraction IA (produits, prix, forfaits, annonces) ---------
+    # Desactivee tant que EXTRACTION_ENABLED=false. Ne fait jamais echouer la
+    # capture : une panne laisse simplement cette capture sans extraction.
+    pe = await extraction_store.extraire_et_enregistrer_async(session, run, target)
+    if pe is not None:
+        session.commit()
+        log_step(session, run, "extraction", extraction_store.resume(pe), attempt=attempt)
+        await _alertes_extraction(session, run, target, pe, attempt)
 
     # --- 2. Deduplication par contenu ------------------------------------
     if not force and settings.dedupe_mode in ("content_hash", "both"):

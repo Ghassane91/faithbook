@@ -452,3 +452,38 @@ class RunLog(Base):
     attempt: Mapped[int | None] = mapped_column(Integer)
 
     run: Mapped[Run] = relationship(back_populates="logs")
+
+
+class PageExtraction(Base):
+    """Resultat de l extraction IA d une capture : une ligne par execution.
+
+    Les lignes extraites (produits, forfaits, annonces) sont conservees en JSON,
+    telles que validees par app.services.extraction. La comparaison avec
+    l extraction precedente de la meme cible produit les alertes.
+    """
+
+    __tablename__ = "page_extractions"
+    __table_args__ = (UniqueConstraint("run_id", name="uq_page_extractions_run_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("targets.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False, index=True
+    )
+    # Nom de la regle appliquee : catalogue, tarifs, editorial.
+    regle: Mapped[str] = mapped_column(String(40), nullable=False)
+    fournisseur: Mapped[str | None] = mapped_column(String(40))
+    modele: Mapped[str | None] = mapped_column(String(120))
+    # Empreinte du texte de la page : texte identique = inutile de rappeler l IA.
+    texte_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    lignes_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    anomalies_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    nb_lignes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tronque: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Vrai quand l extraction a ete reprise de la capture precedente (texte identique).
+    reprise: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -95,6 +95,27 @@ def notify_change(target: Target, run: Run, prev: Run) -> None:
     _send(f"FaithBook — « {target.name} » a changé ({pct} %)", body)
 
 
+def notify_extraction(target: Target, run: Run, evenements: list) -> None:
+    """Un seul message par cible et par capture, regroupant tous les evenements."""
+    if not evenements:
+        return
+    plafond = max(1, settings.extraction_alerts_max)
+    lignes = [e.texte() for e in evenements[:plafond]]
+    reste = len(evenements) - plafond
+    if reste > 0:
+        lignes.append(f"- ... et {reste} autre(s) changement(s)")
+    lien = f"{settings.public_url.rstrip('/')}/#/historique"
+    body = (
+        f"Cible   : {target.name}\n"
+        f"Adresse : {target.url}\n"
+        f"Date    : {run.capture_date}\n\n"
+        + "\n".join(lignes)
+        + f"\n\nCapture et historique :\n{lien}\n\n— FaithBook"
+    )
+    n = len(evenements)
+    _send(f"FaithBook — {target.name} : {n} changement(s) détecté(s)", body)
+
+
 def notify_session_suspended(target: Target, run: Run, account: Account | None) -> None:
     """Alerte immédiate lorsqu'une capture attend une reconnexion ou une 2FA."""
     nom_compte = account.name if account else "compte lié"

@@ -171,7 +171,8 @@ class Settings(BaseSettings):
     # cle a gerer. extraction_provider permet de changer UNIQUEMENT le
     # fournisseur de l extraction sans toucher a la synthese quotidienne des
     # changements (ai_summary), qui reste sur son propre reglage.
-    # Valeurs : "" (reprend ai_summary_provider), "anthropic", "ollama", "deepseek".
+    # Valeurs : "" (reprend ai_summary_provider), "anthropic", "ollama", "deepseek",
+    # "gemini".
     extraction_enabled: bool = False
     extraction_provider: str = ""
     # Vide = reprend ai_summary_model (anthropic) ou deepseek_model (deepseek).
@@ -182,6 +183,12 @@ class Settings(BaseSettings):
     # Plafond de la reponse. Au-dela, le JSON est coupe et la page est ignoree
     # avec une anomalie explicite plutot qu une lecture partielle silencieuse.
     extraction_max_tokens: int = 4000
+    # Alerte (mail, Telegram, webhook) quand une extraction differe de la
+    # precedente : prix, promotion, stock, produit ajoute ou retire, annonce.
+    # Sans effet tant que extraction_enabled est faux.
+    extraction_alerts_enabled: bool = True
+    # Nombre maximal d evenements detailles par message ; le reste est compte.
+    extraction_alerts_max: int = 30
 
     # DeepSeek : API compatible OpenAI, sans rapport avec Anthropic ni Ollama.
     # Cle a obtenir sur platform.deepseek.com. Beaucoup moins cher que Claude
@@ -189,6 +196,17 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
+
+    # Gemini (Google AI Studio), offre gratuite : aucune facturation tant que
+    # « Set up billing » n est pas active dans AI Studio. Cles au format « AQ. »,
+    # acceptees uniquement par l API native (pas par la voie compatible OpenAI).
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_model: str = "gemini-2.5-flash"
+    # Attentes (secondes) avant chaque nouvelle tentative sur 429/500/503 :
+    # les surcharges ponctuelles de l offre gratuite passent en quelques secondes.
+    gemini_retry_delays: str = "5,15"
+    gemini_timeout_seconds: int = 90
 
     # --- Canaux d alerte complementaires (vides = inactifs) ---
     notify_telegram_bot_token: str = ""
