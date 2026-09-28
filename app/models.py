@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -227,8 +228,10 @@ class PasswordResetToken(Base):
 class Account(Base):
     """Un compte connecté (ex. Facebook) avec son profil navigateur isolé.
 
-    Aucun mot de passe de la plateforme n'est stocké : seule la session
+    Pour Facebook, aucun mot de passe n'est stocké : seule la session
     (cookies) obtenue par connexion manuelle est conservée, et chiffrée.
+    Pour les sites qui le permettent (HuntX), des identifiants chiffrés
+    autorisent une reconnexion automatique.
     """
 
     __tablename__ = "accounts"
@@ -256,6 +259,17 @@ class Account(Base):
     # Sauvegarde chiffrée du storage_state (cookies). Le profil de travail vit
     # dans le coffre ; ceci est une copie exportée, elle aussi chiffrée.
     encrypted_state: Mapped[str | None] = mapped_column(Text)
+
+    # --- Connexion automatique (facultative, hors Facebook) ---------------
+    # Pour un site interne comme HuntX : FaithBook remplit lui-même le
+    # formulaire de connexion quand la session a expiré. Identifiant et mot
+    # de passe sont chiffrés ensemble (Fernet, même clé que les sessions) et
+    # ne sont jamais renvoyés par l'API.
+    login_url: Mapped[str | None] = mapped_column(Text)
+    encrypted_credentials: Mapped[str | None] = mapped_column(Text)
+    # JSON facultatif {"username": ..., "password": ..., "submit": ...} :
+    # sélecteurs CSS si les valeurs par défaut ne trouvent pas les champs.
+    login_selectors: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -343,6 +357,12 @@ class Target(Base):
     # Etiquettes libres separees par des virgules : regrouper les cibles
     # par client ou par theme sans imposer une arborescence rigide.
     tags: Mapped[str | None] = mapped_column(Text)
+    # Déplie les zones qui défilent à l'intérieur de la page (listes avec leur
+    # propre barre de défilement) avant la capture, pour les photographier en
+    # entier au lieu de n'en garder que la partie visible.
+    expand_scroll_areas: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false(), nullable=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

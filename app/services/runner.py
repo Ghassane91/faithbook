@@ -26,7 +26,7 @@ from app.models import (
     utcnow,
 )
 from app.services import crypto, drive_sync, pagination, quotas, run_queue
-from app.services import ai_summary, extraction_diff, extraction_store
+from app.services import ai_summary, auto_login, extraction_diff, extraction_store
 from app.services.capture import (
     SessionExpired,
     build_filename,
@@ -41,6 +41,7 @@ from app.services.capture import (
     text_change_ratio,
     thumb_path,
 )
+from app.services.regles_extraction import REGLES
 from app.services.notify import (
     notify_change,
     notify_extraction,
@@ -326,8 +327,10 @@ async def _alertes_extraction(session: Session, run: Run, target: Target, pe, at
         avant = extraction_store.precedente(session, target.id, run.id)
         if avant is None or avant.regle != pe.regle:
             return
+        regle = REGLES.get(pe.regle)
         evenements = extraction_diff.comparer(
-            pe.regle, extraction_store.lignes(avant), extraction_store.lignes(pe)
+            pe.regle, extraction_store.lignes(avant), extraction_store.lignes(pe),
+            plafond=regle.max_lignes if regle else None,
         )
         if not evenements:
             return
@@ -374,6 +377,7 @@ async def _attempt_once(
     account: Account | None = None
     account_storage = None
     account_profile_slug = None
+    identifiants = None
     if target.account_id:
         account = session.get(Account, target.account_id)
         if account is None:
@@ -382,22 +386,36 @@ async def _attempt_once(
                 AccountStatus.disconnected,
             )
         account_profile_slug = account.profile_slug
-        if not account.encrypted_state and not crypto.profile_exists(account.profile_slug):
+        identifiants = auto_login.charger(account)
+        if identifiants is not None and not account.encrypted_state and not crypto.profile_exists(
+            account.profile_slug
+        ):
+            # Premiere capture d un compte a connexion automatique : aucune
+            # session encore, FaithBook va se connecter lui-meme.
+            log_step(session, run, "capture",
+                     f"Compte « {account.name} » : première connexion automatique",
+                     attempt=attempt)
+        elif not account.encrypted_state and not crypto.profile_exists(account.profile_slug):
             raise SessionExpired(
                 f"Le compte « {account.name} » n'a aucune session enregistrée.",
                 AccountStatus.disconnected,
             )
         if not account.encrypted_state:
-            log_step(
-                session,
-                run,
-                "capture",
-                f"Compte « {account.name} » chargé depuis son coffre chiffré",
-                attempt=attempt,
-            )
+            if crypto.profile_exists(account.profile_slug):
+                log_step(
+                    session,
+                    run,
+                    "capture",
+                    f"Compte « {account.name} » chargé depuis son coffre chiffré",
+                    attempt=attempt,
+                )
         else:
             account_storage = encrypted_state_to_storage(account.encrypted_state)
-            if account_storage is None and not crypto.profile_exists(account.profile_slug):
+            if (
+                account_storage is None
+                and not crypto.profile_exists(account.profile_slug)
+                and identifiants is None
+            ):
                 raise SessionExpired(
                     f"Session du compte « {account.name} » illisible.",
                     AccountStatus.disconnected,
@@ -412,7 +430,11 @@ async def _attempt_once(
         destination,
         account_storage=account_storage,
         account_profile_slug=account_profile_slug,
+        identifiants=identifiants,
     )
+    if result.logged_in_again:
+        log_step(session, run, "session",
+                 "Session expirée : reconnexion automatique réussie", attempt=attempt)
 
     if target.organization_id is not None:
         try:

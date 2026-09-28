@@ -142,9 +142,12 @@ async def check_all_sessions() -> None:
     expirations: list[str] = []
     with session_scope() as s:
         accounts = s.scalars(select(Account)).all()
+        # Les comptes a connexion automatique (HuntX...) se reconnectent seuls
+        # a la capture : le test quotidien, propre a Facebook, ne les concerne pas.
         infos = [
             (a.id, a.name, a.profile_slug, a.platform, a.encrypted_state)
             for a in accounts
+            if not a.encrypted_credentials
         ]
 
     for account_id, name, slug, platform, encrypted_state in infos:

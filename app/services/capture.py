@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 
 from app.config import settings
 from app.models import AccountStatus, Target
-from app.services import crypto, session_state, ssrf
+from app.services import auto_login, crypto, session_state, ssrf, zones_defilantes
 from app.services.metrics import parse_page_metrics
 from app.services.profile_lock import get_profile_lock
 
@@ -36,6 +36,8 @@ class CaptureResult:
     storage_state: dict | None = None
     scroll_steps: int = 0
     document_height: int | None = None
+    # Vrai si FaithBook a dû refaire la connexion automatique pendant la capture.
+    logged_in_again: bool = False
 
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -509,6 +511,7 @@ async def capture_page(
     destination: Path,
     account_storage: dict | None = None,
     account_profile_slug: str | None = None,
+    identifiants: auto_login.Identifiants | None = None,
 ) -> CaptureResult:
     """Sérialise l'accès au coffre du compte, puis exécute la capture."""
     if account_profile_slug:
@@ -518,6 +521,7 @@ async def capture_page(
                 destination,
                 account_storage=account_storage,
                 account_profile_slug=account_profile_slug,
+                identifiants=identifiants,
             )
     return await _capture_page_impl(target, destination, account_storage=account_storage)
 
@@ -527,6 +531,7 @@ async def _capture_page_impl(
     destination: Path,
     account_storage: dict | None = None,
     account_profile_slug: str | None = None,
+    identifiants: auto_login.Identifiants | None = None,
 ) -> CaptureResult:
     """Ouvre la page avec Chromium et ecrit la capture pleine page sur disque.
 
@@ -557,6 +562,7 @@ async def _capture_page_impl(
 
     work_dir: Path | None = None
     refreshed_storage: dict | None = None
+    logged_in_again = False
     async with async_playwright() as pw:
         context_kwargs: dict = {
             "viewport": {"width": width, "height": height},
@@ -634,16 +640,32 @@ async def _capture_page_impl(
                 await page.wait_for_timeout(wait_after)
             guard.raise_if_blocked()
 
+            # Connexion automatique (HuntX...) : si le site affiche son
+            # formulaire au lieu de la page, FaithBook se connecte puis revient.
+            if account_profile_slug and identifiants is not None:
+                try:
+                    reconnecte = await auto_login.connecter_si_besoin(
+                        page, identifiants, target.url, target.wait_until, timeout
+                    )
+                except auto_login.ConnexionRefusee as exc:
+                    raise SessionExpired(str(exc), AccountStatus.disconnected) from exc
+                if reconnecte:
+                    logged_in_again = True
+                    if wait_after:
+                        await page.wait_for_timeout(wait_after)
+                    guard.raise_if_blocked()
+
             if account_profile_slug:
+                plateforme = "Facebook" if identifiants is None else "Le site"
                 lower_url = page.url.lower()
                 if any(marker in lower_url for marker in ("checkpoint", "two_factor", "captcha")):
                     raise SessionExpired(
-                        f"Facebook demande une vérification manuelle : {page.url}",
+                        f"{plateforme} demande une vérification manuelle : {page.url}",
                         AccountStatus.verification_required,
                     )
                 if any(marker in lower_url for marker in ("login", "recover")):
                     raise SessionExpired(
-                        f"Facebook a déconnecté le compte : {page.url}",
+                        f"{plateforme} a déconnecté le compte : {page.url}",
                         AccountStatus.disconnected,
                     )
 
@@ -702,6 +724,12 @@ async def _capture_page_impl(
                 else:
                     scroll_steps, document_height = await load_lazy_content(page)
 
+            # Listes à défilement interne : dépliées pour être capturées en entier.
+            if getattr(target, "expand_scroll_areas", False):
+                depliage = await zones_defilantes.deplier(page)
+                if depliage.get("hauteur"):
+                    document_height = depliage["hauteur"]
+
             title = await page.title()
             final_url = page.url
             # Defense en profondeur : l'URL finale doit elle aussi rester
@@ -754,4 +782,5 @@ async def _capture_page_impl(
         storage_state=refreshed_storage,
         scroll_steps=scroll_steps,
         document_height=document_height,
+        logged_in_again=logged_in_again,
     )
