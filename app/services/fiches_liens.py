@@ -34,6 +34,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 DOSSIER_RACINE = "HuntX - fiches produit"
+DOSSIER_LIGNES = "HuntX - lignes par camera"
 
 # Lit le tableau : une entree par lien externe, avec la colonne d'origine.
 JS_LIENS = r"""
@@ -153,15 +154,83 @@ def est_bloquee(texte: str | None) -> bool:
     return any(m in bas for m in MARQUEURS_BLOCAGE)
 
 
-def lancer_en_arriere_plan(liens: list[dict], capture_date: str, run_id: int) -> Path | None:
+async def capturer_lignes(page, dossier: Path) -> list[dict]:
+    """Une image par ligne du tableau : en-tete des colonnes + la ligne.
+
+    Les prix de chaque marketplace sont ceux affiches par HuntX : aucune
+    visite chez les marchands, donc aucun blocage possible. Ne leve jamais.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    lignes: list[dict] = []
+    try:
+        table = page.locator("table:has(tbody tr[data-id])").first
+        if await table.count() == 0:
+            return lignes
+        dossier.mkdir(parents=True, exist_ok=True)
+        entete = Image.open(BytesIO(await table.locator("thead").screenshot(type="png"))).convert("RGB")
+        vus: set[str] = set()
+        rangees = table.locator("tbody tr[data-id]")
+        for i in range(await rangees.count()):
+            rangee = rangees.nth(i)
+            cellules = rangee.locator("td")
+            marque = (await cellules.nth(0).inner_text()).strip()
+            modele = (await cellules.nth(1).inner_text()).strip().split("\n")[0]
+            nom = nettoyer(f"{marque} - {modele}") + ".jpg"
+            if nom in vus:
+                continue
+            vus.add(nom)
+            await rangee.scroll_into_view_if_needed()
+            image = Image.open(BytesIO(await rangee.screenshot(type="png"))).convert("RGB")
+            largeur = max(entete.width, image.width)
+            composee = Image.new("RGB", (largeur, entete.height + image.height), (0, 0, 0))
+            composee.paste(entete, (0, 0))
+            composee.paste(image, (0, entete.height))
+            chemin = dossier / f"ligne-{i:04d}.jpg"
+            composee.save(chemin, "JPEG", quality=85)
+            lignes.append({"fichier": str(chemin), "nom": nom})
+    except Exception:  # noqa: BLE001 - la capture principale reste valable
+        logger.warning("Images par ligne impossibles (%d faites)", len(lignes), exc_info=True)
+    return lignes
+
+
+def envoyer_lignes(lignes: list[dict], capture_date: str, run_id: int | None = None) -> int:
+    """Envoie les images de lignes sur Drive, puis les efface du disque."""
+    from app.services.drive import drive_client
+
+    if not lignes or not drive_client.is_configured():
+        return 0
+    racine = drive_client.ensure_folder(DOSSIER_LIGNES, settings.google_drive_parent_folder_id or None)
+    jour = drive_client.ensure_folder(capture_date, racine)
+    envoyees = 0
+    for ligne in lignes:
+        chemin = Path(ligne["fichier"])
+        try:
+            if chemin.is_file():
+                drive_client.upload(chemin, jour, ligne["nom"])
+                envoyees += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Ligne %s non envoyee : %s", ligne["nom"], exc)
+        finally:
+            chemin.unlink(missing_ok=True)
+    _journaliser(run_id, f"Lignes par caméra : {envoyees}/{len(lignes)} image(s) envoyée(s) "
+                         f"sur Drive ({DOSSIER_LIGNES}/{capture_date}/).")
+    return envoyees
+
+
+def lancer_en_arriere_plan(liens: list[dict], capture_date: str, run_id: int,
+                           lignes: list[dict] | None = None) -> Path | None:
     """Ecrit la liste et lance le processus separe. Ne bloque jamais le runner."""
-    if not liens:
+    if not liens and not lignes:
         return None
     dossier = Path(settings.data_dir) / "fiches-liens"
     dossier.mkdir(parents=True, exist_ok=True)
     fichier = dossier / f"{capture_date}_run{run_id}.json"
     fichier.write_text(
-        json.dumps({"date": capture_date, "run_id": run_id, "liens": liens}, ensure_ascii=False),
+        json.dumps({"date": capture_date, "run_id": run_id, "liens": liens, "lignes": lignes or []},
+                   ensure_ascii=False),
         encoding="utf-8",
     )
     journal = open(dossier / f"{capture_date}_run{run_id}.log", "ab")  # noqa: SIM115
@@ -255,6 +324,8 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
 def main(chemin: str) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     donnees = json.loads(Path(chemin).read_text(encoding="utf-8"))
+    # D'abord les lignes HuntX : rapides et jamais bloquees.
+    envoyer_lignes(donnees.get("lignes") or [], donnees["date"], donnees.get("run_id"))
     liens = depuis_json(donnees.get("liens") or [])
     ignorees = marketplaces_ignorees()
     exclus = [l for l in liens if l.marketplace.casefold() in ignorees]

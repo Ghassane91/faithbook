@@ -93,3 +93,44 @@ def test_marketplaces_ignorees(monkeypatch):
     assert fiches_liens.marketplaces_ignorees() == {"walmart", "bass pro - cabela's"}
     monkeypatch.setattr(fiches_liens.settings, "fiches_marketplaces_ignorees", "")
     assert fiches_liens.marketplaces_ignorees() == set()
+
+
+@pytest.mark.asyncio
+async def test_une_image_par_ligne_avec_en_tete(tmp_path):
+    pw_mod = pytest.importorskip("playwright.async_api")
+    from PIL import Image
+
+    async with pw_mod.async_playwright() as pw:
+        chemin = "/opt/pw-browsers/chromium"
+        try:
+            nav = await (pw.chromium.launch(executable_path=chemin) if os.path.exists(chemin)
+                         else pw.chromium.launch())
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"Chromium indisponible : {exc}")
+        try:
+            page = await nav.new_page()
+            await page.set_content(TABLEAU)
+            lignes = await fiches_liens.capturer_lignes(page, tmp_path / "lignes")
+            hauteur_entete = await page.evaluate("document.querySelector('thead').getBoundingClientRect().height")
+            hauteur_ligne = await page.evaluate("document.querySelector('tbody tr').getBoundingClientRect().height")
+        finally:
+            await nav.close()
+    assert [l["nom"] for l in lignes] == [
+        "Browning Trail Cameras - Command Ops Elite 22.jpg", "Stealth Cam - Deceptor Max.jpg",
+    ]
+    with Image.open(lignes[0]["fichier"]) as im:
+        assert abs(im.height - (hauteur_entete + hauteur_ligne)) <= 3
+
+
+def test_envoi_des_lignes_puis_nettoyage(tmp_path):
+    fichier = tmp_path / "l.jpg"
+    fichier.write_bytes(b"x")
+    faux = mock.MagicMock()
+    faux.is_configured.return_value = True
+    faux.ensure_folder.side_effect = ["racine", "jour"]
+    with mock.patch("app.services.drive.drive_client", faux), \
+         mock.patch.object(fiches_liens, "_journaliser"):
+        n = fiches_liens.envoyer_lignes([{"fichier": str(fichier), "nom": "A - B.jpg"}], "2026-09-30", 1)
+    assert n == 1 and not fichier.exists()
+    faux.upload.assert_called_once_with(fichier, "jour", "A - B.jpg")
+    assert faux.ensure_folder.call_args_list[0].args[0] == fiches_liens.DOSSIER_LIGNES
