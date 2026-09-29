@@ -363,6 +363,12 @@ class Target(Base):
     expand_scroll_areas: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false(), nullable=False
     )
+    # Après la capture, ouvre chaque lien produit du tableau de la page (une
+    # ligne = un produit, une colonne = un marchand) et range les captures
+    # sur Drive par marketplace. Conçu pour HuntX > Cameras.
+    capture_row_links: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false(), nullable=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

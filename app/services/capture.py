@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 
 from app.config import settings
 from app.models import AccountStatus, Target
-from app.services import auto_login, crypto, session_state, ssrf, zones_defilantes
+from app.services import auto_login, crypto, fiches_liens, session_state, ssrf, zones_defilantes
 from app.services.metrics import parse_page_metrics
 from app.services.profile_lock import get_profile_lock
 
@@ -38,6 +38,8 @@ class CaptureResult:
     document_height: int | None = None
     # Vrai si FaithBook a dû refaire la connexion automatique pendant la capture.
     logged_in_again: bool = False
+    # Liens produit lus dans le tableau de la page (option capture_row_links).
+    row_links: list | None = None
 
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -730,6 +732,12 @@ async def _capture_page_impl(
                 if depliage.get("hauteur"):
                     document_height = depliage["hauteur"]
 
+            row_links = None
+            if getattr(target, "capture_row_links", False):
+                try:
+                    row_links = await page.evaluate(fiches_liens.JS_LIENS)
+                except Exception:  # noqa: BLE001 - la capture principale reste valable
+                    logger.warning("Lecture des liens du tableau impossible", exc_info=True)
             title = await page.title()
             final_url = page.url
             # Defense en profondeur : l'URL finale doit elle aussi rester
@@ -783,4 +791,5 @@ async def _capture_page_impl(
         scroll_steps=scroll_steps,
         document_height=document_height,
         logged_in_again=logged_in_again,
+        row_links=row_links,
     )

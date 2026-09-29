@@ -205,7 +205,10 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     # Attentes (secondes) avant chaque nouvelle tentative sur 429/500/503 :
     # les surcharges ponctuelles de l offre gratuite passent en quelques secondes.
-    gemini_retry_delays: str = "5,15"
+    gemini_retry_delays: str = "5,15,45"
+    # Modele de secours (offre gratuite) quand le principal reste surcharge
+    # (503) ou a epuise son quota (429). Vide = pas de secours.
+    gemini_fallback_model: str = "gemini-flash-lite-latest"
     gemini_timeout_seconds: int = 90
 
     # --- Canaux d alerte complementaires (vides = inactifs) ---

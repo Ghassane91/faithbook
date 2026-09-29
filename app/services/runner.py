@@ -26,7 +26,7 @@ from app.models import (
     utcnow,
 )
 from app.services import crypto, drive_sync, pagination, quotas, run_queue
-from app.services import ai_summary, auto_login, extraction_diff, extraction_store
+from app.services import ai_summary, auto_login, extraction_diff, extraction_store, fiches_liens
 from app.services.capture import (
     SessionExpired,
     build_filename,
@@ -665,6 +665,24 @@ async def _attempt_once(
                 level="ERROR",
                 attempt=attempt,
             )
+
+    # --- 3ter. Fiches produit liées (HuntX > Cameras) ---------------------
+    # Plusieurs centaines de pages : traitement dans un processus séparé,
+    # pour ne pas bloquer les autres captures de la file.
+    if getattr(target, "capture_row_links", False):
+        try:
+            liens = result.row_links or []
+            fichier = fiches_liens.lancer_en_arriere_plan(liens, run.capture_date, run.id)
+            log_step(
+                session, run, "fiches",
+                f"{len(liens)} lien(s) produit lus dans le tableau ; captures lancées en arrière-plan"
+                if fichier else "Aucun lien produit trouvé dans le tableau",
+                level="INFO" if fichier else "WARNING",
+                attempt=attempt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_step(session, run, "fiches", f"Lancement des fiches produit impossible : {exc}",
+                     level="ERROR", attempt=attempt)
 
 
 async def _envoyer_pdf_par_ecran(
