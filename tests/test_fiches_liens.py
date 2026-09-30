@@ -134,3 +134,31 @@ def test_envoi_des_lignes_puis_nettoyage(tmp_path):
     assert n == 1 and not fichier.exists()
     faux.upload.assert_called_once_with(fichier, "jour", "A - B.jpg")
     assert faux.ensure_folder.call_args_list[0].args[0] == fiches_liens.DOSSIER_LIGNES
+
+
+@pytest.mark.asyncio
+async def test_page_anti_robot_jamais_envoyee_sur_drive(tmp_path):
+    from types import SimpleNamespace
+
+    liens = [
+        Lien("Spypoint", "Flex", "AMAZON", "https://www.amazon.com/dp/1"),
+        Lien("Spypoint", "Flex", "WALMART", "https://www.walmart.com/ip/1"),
+    ]
+    textes = {liens[0].url: "Spypoint Flex trail camera " * 40, liens[1].url: "Robot or human?"}
+
+    async def fausse_capture(cible, destination, **_):
+        destination.write_bytes(b"x")
+        return SimpleNamespace(body_text=textes[cible.url])
+
+    faux = mock.MagicMock()
+    faux.is_configured.return_value = True
+    faux.ensure_folder.side_effect = lambda nom, parent=None: f"id-{nom}"
+    with mock.patch("app.services.drive.drive_client", faux), \
+         mock.patch("app.services.capture.capture_page", fausse_capture), \
+         mock.patch.object(fiches_liens.settings, "screenshot_dir", str(tmp_path)), \
+         mock.patch.object(fiches_liens, "_journaliser"):
+        bilan = await fiches_liens.capturer_tout(liens, "2026-09-30", 1, pause_s=0)
+    assert bilan == {"total": 2, "ok": 1, "bloquees": 1, "erreurs": 0}
+    faux.upload.assert_called_once()
+    assert faux.upload.call_args.args[1:] == ("id-Amazon", "Spypoint - Flex.jpg")
+    assert not any(tmp_path.rglob("*.jpg"))

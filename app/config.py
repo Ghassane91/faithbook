@@ -211,6 +211,10 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-flash-lite-latest"
     gemini_timeout_seconds: int = 90
 
+    # Fiches produit HuntX : marketplaces a ne pas tenter (anti-robot
+    # systematique constate le 29/09/2026). Vide = tout tenter.
+    fiches_marketplaces_ignorees: str = "Walmart,Academy,Bass Pro - Cabela's"
+
     # --- Canaux d alerte complementaires (vides = inactifs) ---
     notify_telegram_bot_token: str = ""
     notify_telegram_chat_id: str = ""

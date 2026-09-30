@@ -77,7 +77,7 @@ MARKETPLACES_PAR_DOMAINE = (
     ("cabelas.", "Bass Pro - Cabela's"),
 )
 
-# Pages anti-robot : la capture est gardee, mais son nom le signale.
+# Pages anti-robot : reconnues au texte, jamais envoyees sur Drive.
 MARQUEURS_BLOCAGE = (
     "robot or human", "verify you are human", "verify you are a human", "are you a robot",
     "captcha", "access denied", "enter the characters you see",
@@ -289,15 +289,16 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
         fichier_local = travail / f"{n:04d}.jpg"
         try:
             resultat = await capture_page(_cible_temporaire(lien.url), fichier_local)
-            nom = lien.nom_fichier
             if est_bloquee(resultat.body_text):
-                nom = nom[:-4] + " - BLOQUE.jpg"
+                # Page anti-robot a la place de la fiche : rien d'utile, rien sur Drive.
                 bilan["bloquees"] += 1
+                logger.info("Fiche %s (%s) : page anti-robot, non envoyee", lien.url, lien.marketplace)
             else:
                 bilan["ok"] += 1
-            if lien.marketplace not in dossiers:
-                dossiers[lien.marketplace] = drive_client.ensure_folder(lien.marketplace, jour)
-            await asyncio.to_thread(drive_client.upload, fichier_local, dossiers[lien.marketplace], nom)
+                if lien.marketplace not in dossiers:
+                    dossiers[lien.marketplace] = drive_client.ensure_folder(lien.marketplace, jour)
+                await asyncio.to_thread(drive_client.upload, fichier_local,
+                                        dossiers[lien.marketplace], lien.nom_fichier)
         except Exception as exc:  # noqa: BLE001 - une fiche en echec n'arrete pas les autres
             texte = str(exc)
             if "HTTP 403" in texte or "HTTP 429" in texte or "ERR_HTTP2_PROTOCOL_ERROR" in texte:
