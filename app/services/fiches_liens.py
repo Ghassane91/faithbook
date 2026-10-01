@@ -30,6 +30,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import settings
+from app.services.web_challenges import WebChallenge, detect_challenge
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +77,6 @@ MARKETPLACES_PAR_DOMAINE = (
     ("basspro.", "Bass Pro - Cabela's"),
     ("cabelas.", "Bass Pro - Cabela's"),
 )
-
-# Pages anti-robot : reconnues au texte, jamais envoyees sur Drive.
-MARQUEURS_BLOCAGE = (
-    "robot or human", "verify you are human", "verify you are a human", "are you a robot",
-    "captcha", "access denied", "enter the characters you see",
-    "sorry, we just need to make sure you're not a robot", "press & hold",
-    "request unsuccessful", "pardon our interruption",
-)
-
 
 @dataclass(frozen=True)
 class Lien:
@@ -148,10 +140,11 @@ def marketplaces_ignorees() -> set[str]:
 
 
 def est_bloquee(texte: str | None) -> bool:
-    bas = (texte or "").lower()
-    if len(bas.strip()) < 300:
+    contenu = texte or ""
+    if len(contenu.strip()) < 300:
         return True
-    return any(m in bas for m in MARQUEURS_BLOCAGE)
+    # Une notice reCAPTCHA dans le pied de page n'est pas un interstitiel.
+    return detect_challenge("", contenu) is not None
 
 
 async def capturer_lignes(page, dossier: Path) -> list[dict]:
@@ -294,14 +287,15 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
                 bilan["bloquees"] += 1
                 logger.info("Fiche %s (%s) : page anti-robot, non envoyee", lien.url, lien.marketplace)
             else:
-                bilan["ok"] += 1
                 if lien.marketplace not in dossiers:
                     dossiers[lien.marketplace] = drive_client.ensure_folder(lien.marketplace, jour)
                 await asyncio.to_thread(drive_client.upload, fichier_local,
                                         dossiers[lien.marketplace], lien.nom_fichier)
+                bilan["ok"] += 1
         except Exception as exc:  # noqa: BLE001 - une fiche en echec n'arrete pas les autres
             texte = str(exc)
-            if "HTTP 403" in texte or "HTTP 429" in texte or "ERR_HTTP2_PROTOCOL_ERROR" in texte:
+            if (isinstance(exc, WebChallenge) or "HTTP 403" in texte or "HTTP 429" in texte
+                    or "ERR_HTTP2_PROTOCOL_ERROR" in texte):
                 bilan["bloquees"] += 1  # le marchand refuse les robots : rien a capturer
             else:
                 bilan["erreurs"] += 1

@@ -14,9 +14,10 @@ from playwright.async_api import async_playwright
 
 from app.config import settings
 from app.models import AccountStatus, Target
-from app.services import auto_login, crypto, fiches_liens, session_state, ssrf, zones_defilantes
+from app.services import auto_login, crypto, fiches_liens, remote_browser, session_state, ssrf, zones_defilantes
 from app.services.metrics import parse_page_metrics
 from app.services.profile_lock import get_profile_lock
+from app.services.web_challenges import WebChallenge, assert_no_challenge
 
 logger = logging.getLogger(__name__)
 
@@ -518,6 +519,20 @@ async def capture_page(
     identifiants: auto_login.Identifiants | None = None,
 ) -> CaptureResult:
     """Sérialise l'accès au coffre du compte, puis exécute la capture."""
+    if remote_browser.selected(
+        target, account_storage=account_storage,
+        account_profile_slug=account_profile_slug, identifiants=identifiants,
+    ):
+        try:
+            async with asyncio.timeout(settings.remote_browser_timeout_seconds):
+                return await _capture_page_impl(target, destination, use_remote=True)
+        except (WebChallenge, remote_browser.RemoteBrowserError, ssrf.UrlRejected):
+            raise
+        except Exception:
+            # Les erreurs Playwright/CDP peuvent contenir l'endpoint et sa cle.
+            raise remote_browser.RemoteBrowserError(
+                "Capture distante echouee ou delai depasse. Verifier le service et son quota."
+            ) from None
     if account_profile_slug:
         async with get_profile_lock(account_profile_slug):
             return await _capture_page_impl(
@@ -527,7 +542,9 @@ async def capture_page(
                 account_profile_slug=account_profile_slug,
                 identifiants=identifiants,
             )
-    return await _capture_page_impl(target, destination, account_storage=account_storage)
+    return await _capture_page_impl(
+        target, destination, account_storage=account_storage, identifiants=identifiants
+    )
 
 
 async def _capture_page_impl(
@@ -536,6 +553,7 @@ async def _capture_page_impl(
     account_storage: dict | None = None,
     account_profile_slug: str | None = None,
     identifiants: auto_login.Identifiants | None = None,
+    use_remote: bool = False,
 ) -> CaptureResult:
     """Ouvre la page avec Chromium et ecrit la capture pleine page sur disque.
 
@@ -552,6 +570,8 @@ async def _capture_page_impl(
     height = target.viewport_height or settings.default_viewport_height
     full_page_effectif = target.full_page and not getattr(settings, "capture_viewport_only", False)
     timeout = target.timeout_ms or settings.default_timeout_ms
+    if use_remote:
+        timeout = settings.remote_browser_timeout_seconds * 1000
     wait_after = (
         target.wait_after_load_ms
         if target.wait_after_load_ms is not None
@@ -582,7 +602,9 @@ async def _capture_page_impl(
             context_kwargs["locale"] = target.locale
 
         browser = None
-        if account_profile_slug:
+        if use_remote:
+            browser, context = await remote_browser.connect(pw, context_kwargs)
+        elif account_profile_slug:
             # Compte connecté : le profil est déchiffré en RAM puis rescellé.
             # Cela conserve aussi les cookies que Facebook fait tourner pendant
             # une capture, contrairement à un contexte éphémère.
@@ -625,24 +647,32 @@ async def _capture_page_impl(
                     context_kwargs["storage_state"] = state
             context = await browser.new_context(**context_kwargs)
 
-        context.set_default_timeout(timeout)
-        guard = await ssrf.install_browser_guard(context)
-        page = context.pages[0] if context.pages else await context.new_page()
         try:
+            context.set_default_timeout(timeout)
+            guard = await (remote_browser.install_guard(context) if use_remote
+                           else ssrf.install_browser_guard(context))
+            page = context.pages[0] if context.pages else await context.new_page()
             try:
-                response = await page.goto(
-                    target.url, wait_until=target.wait_until, timeout=timeout
-                )
+                if use_remote:
+                    response = await remote_browser.navigate(page, context, target, timeout, guard)
+                else:
+                    response = await page.goto(
+                        target.url, wait_until=target.wait_until, timeout=timeout
+                    )
             except Exception:
                 guard.raise_if_blocked()
                 raise
             guard.raise_if_blocked()
             if response is not None and response.status >= 400:
+                await assert_no_challenge(page)
+                if response.status in (403, 429):
+                    raise WebChallenge()
                 raise RuntimeError(f"HTTP {response.status} sur {target.url}")
 
             if wait_after:
                 await page.wait_for_timeout(wait_after)
             guard.raise_if_blocked()
+            await assert_no_challenge(page)
 
             # Connexion automatique (HuntX...) : si le site affiche son
             # formulaire au lieu de la page, FaithBook se connecte puis revient.
@@ -652,12 +682,14 @@ async def _capture_page_impl(
                         page, identifiants, target.url, target.wait_until, timeout
                     )
                 except auto_login.ConnexionRefusee as exc:
+                    await assert_no_challenge(page)
                     raise SessionExpired(str(exc), AccountStatus.disconnected) from exc
                 if reconnecte:
                     logged_in_again = True
                     if wait_after:
                         await page.wait_for_timeout(wait_after)
                     guard.raise_if_blocked()
+                    await assert_no_challenge(page)
 
             if account_profile_slug:
                 plateforme = "Facebook" if identifiants is None else "Le site"
@@ -702,6 +734,7 @@ async def _capture_page_impl(
                         target.expected_selector, state="attached", timeout=min(timeout, 15000)
                     )
                 except Exception as exc:
+                    await assert_no_challenge(page)
                     raise SessionExpired(
                         f"Element attendu '{target.expected_selector}' absent de la page "
                         "(session expiree, page modifiee ou contenu non charge)"
@@ -734,6 +767,8 @@ async def _capture_page_impl(
                 if depliage.get("hauteur"):
                     document_height = depliage["hauteur"]
 
+            # Une verification peut apparaitre pendant le scroll/chargement.
+            await assert_no_challenge(page)
             row_links = None
             row_images = None
             if getattr(target, "capture_row_links", False):
@@ -761,6 +796,9 @@ async def _capture_page_impl(
             if not screenshot_written:
                 await page.screenshot(path=str(destination), full_page=full_page_effectif, type="jpeg", quality=75)
             guard.raise_if_blocked()
+        except WebChallenge:
+            destination.unlink(missing_ok=True)
+            raise
         finally:
             if account_profile_slug:
                 try:
@@ -772,11 +810,17 @@ async def _capture_page_impl(
                         exc_info=True,
                     )
             try:
-                await context.close()
+                if use_remote:
+                    await remote_browser.close_safely(context)
+                else:
+                    await context.close()
             finally:
                 try:
                     if browser is not None:
-                        await browser.close()
+                        if use_remote:
+                            await remote_browser.close_safely(browser)
+                        else:
+                            await browser.close()
                 finally:
                     if account_profile_slug and work_dir is not None:
                         try:
