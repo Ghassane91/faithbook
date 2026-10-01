@@ -42,6 +42,8 @@ class CaptureResult:
     row_links: list | None = None
     # Images par ligne du tableau (option capture_row_links) : [{"fichier", "nom"}].
     row_images: list | None = None
+    # Prix affiches par le tableau, par produit et par marchand (option capture_row_links).
+    row_prices: list | None = None
 
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -736,11 +738,16 @@ async def _capture_page_impl(
 
             row_links = None
             row_images = None
+            row_prices = None
             if getattr(target, "capture_row_links", False):
                 try:
                     row_links = await page.evaluate(fiches_liens.JS_LIENS)
                 except Exception:  # noqa: BLE001 - la capture principale reste valable
                     logger.warning("Lecture des liens du tableau impossible", exc_info=True)
+                try:
+                    row_prices = await page.evaluate(fiches_liens.JS_PRIX)
+                except Exception:  # noqa: BLE001 - la capture principale reste valable
+                    logger.warning("Lecture des prix du tableau impossible", exc_info=True)
                 row_images = await fiches_liens.capturer_lignes(
                     page, destination.parent / f"{destination.stem}-lignes"
                 )
@@ -799,4 +806,5 @@ async def _capture_page_impl(
         logged_in_again=logged_in_again,
         row_links=row_links,
         row_images=row_images,
+        row_prices=row_prices,
     )

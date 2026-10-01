@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 DOSSIER_RACINE = "HuntX - fiches produit"
 DOSSIER_LIGNES = "HuntX - lignes par camera"
+DOSSIER_PRIX = "HuntX - prix par marketplace"
 
 # Lit le tableau : une entree par lien externe, avec la colonne d'origine.
 JS_LIENS = r"""
@@ -54,6 +55,42 @@ JS_LIENS = r"""
       if (!a || a.hostname === location.hostname) return;
       sortie.push({id: tr.dataset.id, marque, modele, colonne: heads[i] || '', url: a.href});
     });
+  }
+  return sortie;
+}
+"""
+
+# Prix affiches par HuntX pour chaque produit et chaque marchand (vue "Price").
+# Une cellule vaut un prix, un statut ("Not displayed", "Broken Link"...) ou "—".
+# La date de releve est dans le title du marqueur : "captured AAAA-MM-JJ" ou
+# "fetched AAAA-MM-JJ".
+JS_PRIX = r"""
+() => {
+  const table = [...document.querySelectorAll('table')]
+    .find(t => t.querySelector('tbody tr[data-id]'));
+  if (!table) return [];
+  const heads = [...table.querySelectorAll('thead tr:last-child th')]
+    .map(th => th.innerText.replace(/[▲▼↑↓]/g, '').trim());
+  const sortie = [];
+  for (const tr of table.querySelectorAll('tbody tr[data-id]')) {
+    const cells = [...tr.children];
+    const ligne = {
+      marque: (cells[0]?.innerText || '').trim(),
+      modele: (cells[1]?.innerText || '').trim().split('\n')[0],
+      cellules: {},
+    };
+    cells.forEach((td, i) => {
+      if (i < 2) return;
+      const a = td.querySelector('a');
+      const marque = td.querySelector('[title]');
+      const date = ((marque && marque.getAttribute('title')) || '').match(/\d{4}-\d{2}-\d{2}/);
+      ligne.cellules[heads[i] || String(i)] = {
+        texte: (a ? a.innerText : td.innerText).replace(/[·↻]/g, '').trim(),
+        date: date ? date[0] : '',
+        url: a && a.href.startsWith('http') ? a.href : '',
+      };
+    });
+    sortie.push(ligne);
   }
   return sortie;
 }
@@ -220,16 +257,73 @@ def envoyer_lignes(lignes: list[dict], capture_date: str, run_id: int | None = N
     return envoyees
 
 
+def _montant(texte: str) -> str:
+    """"$1,299.99" -> "1299,99" (virgule decimale pour Excel en francais) ; sinon ""."""
+    m = re.fullmatch(r"\$\s*([\d,]+(?:\.\d+)?)", (texte or "").strip())
+    return m.group(1).replace(",", "").replace(".", ",") if m else ""
+
+
+def tableau_prix(prix: list[dict], capture_date: str) -> str:
+    """CSV (separateur ;) : une ligne par produit, prix et date de releve par marchand."""
+    import csv
+    import io
+
+    colonnes = [c for c in NOMS_MARKETPLACE if any(c in l.get("cellules", {}) for l in prix)]
+    entete = ["Date capture", "Marque", "Modele"]
+    for c in colonnes:
+        nom = NOMS_MARKETPLACE[c]
+        entete += [f"{nom} - prix (USD)", f"{nom} - statut", f"{nom} - releve le"]
+    sortie = io.StringIO()
+    ecrivain = csv.writer(sortie, delimiter=";", lineterminator="\r\n")
+    ecrivain.writerow(entete)
+    for ligne in prix:
+        rang = [capture_date, ligne.get("marque", ""), ligne.get("modele", "")]
+        for c in colonnes:
+            cellule = ligne.get("cellules", {}).get(c) or {}
+            texte = (cellule.get("texte") or "").strip()
+            montant = _montant(texte)
+            statut = "" if montant else ("non releve" if texte in ("", "—", "-") else texte)
+            rang += [montant, statut, cellule.get("date", "")]
+        ecrivain.writerow(rang)
+    return sortie.getvalue()
+
+
+def envoyer_prix(prix: list[dict], capture_date: str, run_id: int | None = None) -> bool:
+    """Envoie le tableau des prix HuntX sur Drive (un fichier CSV par passage)."""
+    from app.services.drive import drive_client
+
+    if not prix or not drive_client.is_configured():
+        return False
+    dossier = Path(settings.data_dir) / "fiches-liens"
+    dossier.mkdir(parents=True, exist_ok=True)
+    nom = f"HuntX prix par marketplace - {capture_date}.csv"
+    chemin = dossier / nom
+    try:
+        # BOM UTF-8 : Excel ouvre les accents correctement.
+        chemin.write_text(tableau_prix(prix, capture_date), encoding="utf-8-sig")
+        racine = drive_client.ensure_folder(DOSSIER_PRIX, settings.google_drive_parent_folder_id or None)
+        drive_client.upload(chemin, racine, nom)
+    except Exception as exc:  # noqa: BLE001 - les lignes et les fiches passent quand meme
+        _journaliser(run_id, f"Tableau des prix non envoyé : {exc}", "ERROR")
+        return False
+    finally:
+        chemin.unlink(missing_ok=True)
+    _journaliser(run_id, f"Prix par marketplace : {len(prix)} produit(s) -> Drive ({DOSSIER_PRIX}/{nom}).")
+    return True
+
+
 def lancer_en_arriere_plan(liens: list[dict], capture_date: str, run_id: int,
-                           lignes: list[dict] | None = None) -> Path | None:
+                           lignes: list[dict] | None = None,
+                           prix: list[dict] | None = None) -> Path | None:
     """Ecrit la liste et lance le processus separe. Ne bloque jamais le runner."""
-    if not liens and not lignes:
+    if not liens and not lignes and not prix:
         return None
     dossier = Path(settings.data_dir) / "fiches-liens"
     dossier.mkdir(parents=True, exist_ok=True)
     fichier = dossier / f"{capture_date}_run{run_id}.json"
     fichier.write_text(
-        json.dumps({"date": capture_date, "run_id": run_id, "liens": liens, "lignes": lignes or []},
+        json.dumps({"date": capture_date, "run_id": run_id, "liens": liens, "lignes": lignes or [],
+                    "prix": prix or []},
                    ensure_ascii=False),
         encoding="utf-8",
     )
@@ -325,7 +419,8 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
 def main(chemin: str) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     donnees = json.loads(Path(chemin).read_text(encoding="utf-8"))
-    # D'abord les lignes HuntX : rapides et jamais bloquees.
+    # D'abord le tableau des prix et les lignes HuntX : rapides et jamais bloques.
+    envoyer_prix(donnees.get("prix") or [], donnees["date"], donnees.get("run_id"))
     envoyer_lignes(donnees.get("lignes") or [], donnees["date"], donnees.get("run_id"))
     liens = depuis_json(donnees.get("liens") or [])
     ignorees = marketplaces_ignorees()

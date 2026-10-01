@@ -673,10 +673,12 @@ async def _attempt_once(
         try:
             liens = result.row_links or []
             lignes = result.row_images or []
-            fichier = fiches_liens.lancer_en_arriere_plan(liens, run.capture_date, run.id, lignes)
+            prix = getattr(result, "row_prices", None) or []
+            fichier = fiches_liens.lancer_en_arriere_plan(liens, run.capture_date, run.id, lignes, prix)
             log_step(
                 session, run, "fiches",
-                f"{len(lignes)} image(s) de ligne et {len(liens)} lien(s) produit ; "
+                f"{len(prix)} produit(s) avec prix, {len(lignes)} image(s) de ligne et "
+                f"{len(liens)} lien(s) produit ; "
                 "envoi et captures lancés en arrière-plan"
                 if fichier else "Aucune ligne ni lien produit trouvé dans le tableau",
                 level="INFO" if fichier else "WARNING",

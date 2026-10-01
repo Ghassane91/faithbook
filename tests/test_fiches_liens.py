@@ -162,3 +162,70 @@ async def test_page_anti_robot_jamais_envoyee_sur_drive(tmp_path):
     faux.upload.assert_called_once()
     assert faux.upload.call_args.args[1:] == ("id-Amazon", "Spypoint - Flex.jpg")
     assert not any(tmp_path.rglob("*.jpg"))
+
+
+def test_tableau_des_prix_csv():
+    prix = [
+        {"marque": "Browning", "modele": "Command Ops Elite 22", "cellules": {
+            "BRAND": {"texte": "$99.99", "date": "2026-07-26"},
+            "WALMART": {"texte": "$1,072.78", "date": "2026-09-25"},
+            "ACADEMY": {"texte": "—", "date": ""},
+            "BASSPRO/CAB": {"texte": "Broken Link", "date": "2026-09-25"},
+            "MP": {"texte": "22MP", "date": ""},
+        }},
+    ]
+    lignes = fiches_liens.tableau_prix(prix, "2026-10-01").splitlines()
+    entete = lignes[0].split(";")
+    assert entete[:3] == ["Date capture", "Marque", "Modele"]
+    assert "Walmart - prix (USD)" in entete and "MP - prix (USD)" not in entete
+    valeurs = dict(zip(entete, lignes[1].split(";")))
+    assert valeurs["Walmart - prix (USD)"] == "1072,78"
+    assert valeurs["Walmart - releve le"] == "2026-09-25"
+    assert valeurs["Site de la marque - prix (USD)"] == "99,99"
+    assert valeurs["Academy - statut"] == "non releve"
+    assert valeurs["Bass Pro - Cabela's - statut"] == "Broken Link"
+    assert valeurs["Bass Pro - Cabela's - prix (USD)"] == ""
+
+
+def test_envoi_du_tableau_des_prix(tmp_path):
+    faux = mock.MagicMock()
+    faux.is_configured.return_value = True
+    faux.ensure_folder.return_value = "dossier-prix"
+    prix = [{"marque": "A", "modele": "B", "cellules": {"AMAZON": {"texte": "$10.00", "date": ""}}}]
+    with mock.patch("app.services.drive.drive_client", faux), \
+         mock.patch.object(fiches_liens.settings, "data_dir", str(tmp_path)), \
+         mock.patch.object(fiches_liens, "_journaliser"):
+        assert fiches_liens.envoyer_prix(prix, "2026-10-01", 1) is True
+        assert fiches_liens.envoyer_prix([], "2026-10-01", 1) is False
+    assert faux.ensure_folder.call_args.args[0] == fiches_liens.DOSSIER_PRIX
+    chemin, dossier, nom = faux.upload.call_args.args
+    assert dossier == "dossier-prix" and nom == "HuntX prix par marketplace - 2026-10-01.csv"
+    assert not chemin.exists()
+
+
+@pytest.mark.asyncio
+async def test_lecture_des_prix_dans_le_tableau():
+    pw_mod = pytest.importorskip("playwright.async_api")
+    html = TABLEAU.replace(
+        '<a href="https://www.walmart.com/ip/1">$72</a>',
+        '<a href="https://www.walmart.com/ip/1">$72.78</a><span class="cmk" title="fetched 2026-09-25">↻</span>',
+    )
+    async with pw_mod.async_playwright() as pw:
+        chemin = "/opt/pw-browsers/chromium"
+        try:
+            nav = await (pw.chromium.launch(executable_path=chemin) if os.path.exists(chemin)
+                         else pw.chromium.launch())
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"Chromium indisponible : {exc}")
+        try:
+            page = await nav.new_page()
+            await page.set_content(html)
+            prix = await page.evaluate(fiches_liens.JS_PRIX)
+        finally:
+            await nav.close()
+    assert len(prix) == 2
+    premier = prix[0]
+    assert (premier["marque"], premier["modele"]) == ("Browning Trail Cameras", "Command Ops Elite 22")
+    assert premier["cellules"]["WALMART"] == {
+        "texte": "$72.78", "date": "2026-09-25", "url": "https://www.walmart.com/ip/1"}
+    assert premier["cellules"]["ACADEMY"]["texte"] == "—"
