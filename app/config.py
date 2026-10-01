@@ -2,6 +2,7 @@ from functools import lru_cache
 import ipaddress
 from typing import Literal
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -91,6 +92,13 @@ class Settings(BaseSettings):
     # Proxy sortant qui applique une seconde barriere reseau (ACL Squid) apres
     # les validations applicatives. Configure automatiquement par Compose.
     browser_proxy_url: str = ""
+
+    # Navigateur distant pour les pages publiques explicitement selectionnees.
+    # Inactif tant que le fournisseur et son endpoint ne sont pas configures.
+    remote_browser_provider: Literal["disabled", "brightdata", "cdp"] = "disabled"
+    remote_browser_cdp_url: SecretStr = Field(default=SecretStr(""), repr=False)
+    remote_browser_domains: str = "walmart.com,academy.com,basspro.com,cabelas.com"
+    remote_browser_timeout_seconds: int = Field(default=120, ge=15, le=300)
 
     # Planification
     timezone: str = "UTC"
