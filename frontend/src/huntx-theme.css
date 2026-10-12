@@ -74,6 +74,14 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 .btn.ghost:hover:not(:disabled) {background:var(--surface-sunk);color:var(--ink)}
 .btn.danger {color:var(--safelight);background:transparent;border-color:var(--safelight)}
 .panel,.target-card,.run-card,.modal,.drawer,.auth-card {background:var(--surface);color:var(--ink);border-color:var(--rule-soft)}
+.auth-card .auth-brand .brand-mark {color:var(--ink)}
+.auth-card .auth-brand .brand-sub,.auth-card .field>label,.auth-card .auth-intro {color:var(--ink-faint)}
+.auth-card .field>label {font-size:11px}
+.auth-card .btn {background:var(--hx-orange);border-color:var(--hx-orange);color:#fff;border-radius:7px}
+.auth-card .btn:hover:not(:disabled) {background:#a94500;border-color:#a94500;color:#fff}
+.auth-card .linklike {color:var(--ink-soft);font-size:12px;min-height:44px}
+.auth-card .linklike:hover {color:var(--cyan-bright)}
+.auth-card .field input {border-radius:6px;min-height:44px}
 .drawer-head {background:var(--ground)}
 input,select,textarea {background:var(--ground-deep);color:var(--ink);border-color:var(--rule)}
 .field input,.field select,.field textarea {background:var(--ground-deep);color:var(--ink);border:1px solid var(--rule)}
