@@ -3,7 +3,7 @@
 :root, .app-workspace, .landing {
   color-scheme: dark;
   --ground: #08090b; --ground-deep: #0c0e10; --surface: #111418;
-  --surface-sunk: #181c21; --ink: #e8e6e3; --ink-soft: #a4aeb8;
+  --surface-sunk: #181c21; --ink: #ffffff; --ink-soft: #bac3cc;
   --ink-faint: #8a97a3; --rule: #303740; --rule-soft: #262b31;
   --cyan: #cc5500; --cyan-bright: #e0724e; --cyan-wash: #291b14;
   --ok: #8cba9f; --ok-wash: #17271f; --wait: #ddb778; --wait-wash: #30261a;
@@ -90,6 +90,47 @@ input,select,textarea {background:var(--ground-deep);color:var(--ink);border-col
 .workspace-view>section>article {padding:22px;border:1px solid var(--rule-soft);border-radius:10px;background:var(--surface)}
 .workspace-view>section>button,.workspace-view>section>article>button {padding:10px 15px;min-height:44px;border:1px solid var(--rule);background:var(--surface-sunk);border-radius:7px;cursor:pointer}
 .workspace-view a {color:var(--cyan-bright)}
+/* Match the specificity of the legacy workspace rules. All neutral fills
+   stay dark, including history, forms, drawers and comparison controls. */
+html {background:var(--ground)}
+.app-workspace :is(.ribbon,.panel,.frame,.frame-window,.frame-scroll-hint,
+  .empty,.quota-section,.quota-card,.stat-tile,.storage-panel,.legal-note,
+  .local-invite,.drawer,.log,.novnc-frame,.cmp-bar,.cmp-control),
+.landing-example,.landing-prerequis blockquote,.accueil-example,
+.accueil-prerequis blockquote,.accueil-hero,.accueil-stat,
+.novnc-frame,.log,.drawer,.modal,.landing-auth-card {
+  background:var(--ground);
+  color:var(--ink);
+  border-color:var(--rule);
+}
+.accueil-chiffres {background:var(--rule);border-color:var(--rule)}
+.accueil-stat:hover,.accueil-stat:focus-visible {background:var(--surface-sunk)}
+.app-workspace table,.app-workspace th,.app-workspace td {
+  background:var(--ground);
+  color:var(--ink);
+  border-color:var(--rule);
+}
+.app-workspace .cell-title,.app-workspace .cell-url,.app-workspace .cell-time {color:var(--ink)}
+.app-workspace tbody tr:hover,.app-workspace tbody tr.clickable:hover,
+.app-workspace tbody tr:hover>td {background:var(--surface-sunk)}
+.app-workspace input[type]:where(:not([type='checkbox']):not([type='radio'])),
+.app-workspace select,.app-workspace textarea,
+.app-workspace .org-switcher select option,
+.app-workspace .inline-form input,.app-workspace .member-form input,
+.app-workspace .member-form select,.app-workspace .role-select {
+  background:var(--ground);
+  color:var(--ink);
+  border-color:var(--rule);
+}
+.app-workspace .notice.info,.app-workspace .notice.error {color:var(--ink)}
+.overlay,.cmp-overlay,.app-workspace .overlay,.app-workspace .cmp-overlay {background:rgba(0,0,0,.85)}
+.app-workspace .btn {background:var(--hx-orange);border-color:var(--hx-orange);color:#fff}
+.app-workspace .btn:hover:not(:disabled) {background:#a94500;border-color:#a94500;color:#fff}
+.app-workspace .btn.ghost {background:var(--ground);border-color:var(--rule);color:var(--ink)}
+.app-workspace .btn.ghost:hover:not(:disabled) {background:var(--surface-sunk);color:var(--ink)}
+.app-workspace .btn.danger {background:var(--ground);border-color:var(--safelight);color:var(--safelight)}
+.app-workspace .btn.danger:hover:not(:disabled) {background:var(--safelight-wash);color:var(--safelight)}
+.btn:disabled,.app-workspace .btn:disabled {background:var(--surface-sunk);border-color:var(--rule);color:var(--ink-faint)}
 .hx-dashboard {max-width:1500px;margin:auto}
 .hx-heading {display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:30px}
 .hx-kicker {display:flex;align-items:center;gap:8px;font:9px var(--mono);letter-spacing:.14em;color:var(--ink-faint);margin:0 0 12px}
