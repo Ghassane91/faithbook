@@ -253,3 +253,32 @@ export interface LienCapture {
   url: string | null
   expire_dans_secondes: number | null
 }
+
+export interface HuntxArtifact {
+  id: number
+  filename: string
+  kind: string
+  marketplace: string | null
+  image: boolean
+  drive_status: string
+  drive_url: string | null
+  folder_url: string | null
+  result_run_id: number | null
+  source_run_id: number
+  status: string | null
+  error: string | null
+}
+
+export interface HuntxRow {
+  capture_date: string
+  row_key: string
+  row_label: string
+  artifacts: HuntxArtifact[]
+}
+
+export interface HuntxArchivePage {
+  total: number
+  items: HuntxRow[]
+  dates: { date: string; files: number }[]
+  exports: (HuntxArtifact & { capture_date: string })[]
+}

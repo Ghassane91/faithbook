@@ -4,6 +4,7 @@ import type {
   DriveRetry,
   LienCapture,
   Health,
+  HuntxArchivePage,
   Job,
   LoginStatus,
   MetricsSeries,
@@ -77,7 +78,76 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+type HuntxArchiveQuery = { capture_date?: string; query?: string; limit?: number; offset?: number }
+
+export function huntxArchivePath(query: HuntxArchiveQuery = {}) {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  return `/huntx/archive?${params}`
+}
+
+function huntxHeaders(organizationId: number) {
+  if (!Number.isSafeInteger(organizationId) || organizationId <= 0) {
+    throw new Error('Espace de travail invalide.')
+  }
+  return { 'X-Organization-ID': String(organizationId) }
+}
+
+async function huntxBlob(organizationId: number, id: number, options: {
+  thumbnail?: boolean; download?: boolean; signal?: AbortSignal
+} = {}): Promise<Blob> {
+  const headers = huntxHeaders(organizationId)
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Fichier HuntX invalide.')
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  if (options.signal?.aborted) abort()
+  options.signal?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(abort, 25000)
+  try {
+    const params = new URLSearchParams({
+      thumbnail: String(options.thumbnail ?? false), download: String(options.download ?? false),
+    })
+    const res = await fetch(`${BASE}/huntx/files/${id}?${params}`, {
+      credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+      headers: { ...headers, Accept: options.download ? '*/*' : 'image/*' },
+    })
+    if (!res.ok) {
+      let detail = `Fichier indisponible (${res.status}).`
+      try {
+        const body = await res.json()
+        if (typeof body.detail === 'string') detail = body.detail
+      } catch { /* Une réponse sans détail conserve le statut du serveur. */ }
+      if (res.status === 401) onUnauthorized?.()
+      throw new ApiError(res.status, detail)
+    }
+    const type = (res.headers.get('content-type') ?? '').split(';')[0].toLowerCase()
+    const allowed = options.download
+      ? /^(image\/|application\/(json|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet)$|text\/(csv|plain|markdown)$)/.test(type)
+      : type.startsWith('image/')
+    if (!allowed) throw new ApiError(502, 'Le fichier demandé est indisponible.')
+    return await res.blob()
+  } catch (error) {
+    if (controller.signal.aborted && !options.signal?.aborted) {
+      throw new ApiError(408, 'Le serveur met trop de temps à répondre. Réessayez.')
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+    options.signal?.removeEventListener('abort', abort)
+  }
+}
+
 export const api = {
+  huntxArchive: (organizationId: number, query: HuntxArchiveQuery = {}, signal?: AbortSignal) =>
+    request<HuntxArchivePage>(huntxArchivePath(query), {
+      headers: huntxHeaders(organizationId), signal, cache: 'no-store',
+    }),
+  huntxFile: (organizationId: number, id: number, thumbnail = false, signal?: AbortSignal) =>
+    huntxBlob(organizationId, id, { thumbnail, signal }),
+  huntxDownload: (organizationId: number, id: number, signal?: AbortSignal) =>
+    huntxBlob(organizationId, id, { download: true, signal }),
   // Apercu d'une cadence : calcule par le backend avec le vrai declencheur
   // APScheduler. Le navigateur ne saurait reproduire ni cron ni le fuseau,
   // et un apercu approximatif mentirait.

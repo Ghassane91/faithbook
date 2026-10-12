@@ -1,5 +1,9 @@
 # FaithBook — interface Novostok
 
+Depuis le 12 octobre 2026, les adresses `/application/` et `/nouvelle-interface/` servent toutes deux le frontend FaithBook de `frontend/`, conformément à l’interface HuntX choisie. Les archives HuntX sont intégrées à cette application, sous `#/huntx`. Le code de ce dossier est conservé comme ancienne interface ; il n’est plus le frontend publié. Pour mettre à jour les deux adresses, utiliser `ops/deployer-frontend-unique.sh`, documenté dans `docs/frontend-unique.md`.
+
+Les instructions ci-dessous décrivent l’ancien déploiement statique.
+
 Interface de consultation connectée à l’API FaithBook, en français, inspirée de novostok.com.
 
 ## Fonctions

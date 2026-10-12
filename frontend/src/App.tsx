@@ -6,6 +6,7 @@ import { delai, useData, useRoute } from './lib'
 import { ChangerMotDePasse } from './views/ChangerMotDePasse'
 import { AccepterInvitation } from './views/AccepterInvitation'
 import { HuntxOverview, HuntxMark } from './views/HuntxOverview'
+import { HuntxArchive } from './views/HuntxArchive'
 import { Cibles } from './views/Cibles'
 import { Comptes } from './views/Comptes'
 import { Connexion } from './views/Connexion'
@@ -25,6 +26,7 @@ const VUES = [
   { cle: 'historique', idx: '04', titre: 'Historique', icon: 'history' },
   { cle: 'organisation', idx: '05', titre: 'Équipe', icon: 'team' },
   { cle: 'chrome', idx: '06', titre: 'Chrome personnel', icon: 'target' },
+  { cle: 'huntx', idx: '07', titre: 'Archives HuntX', icon: 'board' },
 ]
 
 function dateEditoriale() {
@@ -275,6 +277,8 @@ function AppConnecte() {
         <div className="workspace-view" key={route}>
           {route === 'accueil' ? (
             <HuntxOverview key={organisationActive?.id} onAller={aller} onOuvrirRun={setRunOuvert} canAdmin={canAdmin} organizationId={organisationActive?.id} />
+          ) : route === 'huntx' ? (
+            <HuntxArchive key={organisationActive?.id} organizationId={organisationActive?.id} />
           ) : route === 'cibles' ? (
             <Cibles
               onOuvrirRun={setRunOuvert}
