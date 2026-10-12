@@ -1,4 +1,4 @@
-import type {User,Organization,Target,Run,RunPage,RunStatus} from './faithbook-types';
+import type {User,Organization,Target,Run,RunPage,RunStatus,HuntxPage} from './faithbook-types';
 export class ApiError extends Error { status:number; constructor(status:number,message:string){super(message);this.status=status;} }
 type Options={organizationId?:number;signal?:AbortSignal;method?:string;body?:unknown;blob?:boolean};
 export async function request<T>(path:string,options:Options={}):Promise<T>{
@@ -24,6 +24,9 @@ export async function request<T>(path:string,options:Options={}):Promise<T>{
 export type RunQuery={capture_date?:string;status?:RunStatus;target_id?:number;limit?:number;offset?:number};
 export function runsPath(query:RunQuery={}){const params=new URLSearchParams();for(const [key,value] of Object.entries(query))if(value!==undefined&&value!=='')params.set(key,String(value));return '/runs?'+params.toString();}
 export const api={
+ huntxWorkspaces:(signal?:AbortSignal)=>request<Array<{organization_id:number;files:number}>>('/huntx/workspaces',{signal}),
+ huntxArchive:(organizationId:number,query:{capture_date?:string;query?:string;limit?:number;offset?:number},signal?:AbortSignal)=>{const params=new URLSearchParams();for(const [k,v] of Object.entries(query))if(v!==undefined&&v!=='')params.set(k,String(v));return request<HuntxPage>('/huntx/archive?'+params.toString(),{organizationId,signal})},
+ huntxFile:(organizationId:number,id:number,thumbnail=false,signal?:AbortSignal)=>request<Blob>(`/huntx/files/${id}?thumbnail=${thumbnail}`,{organizationId,signal,blob:true}),
  me:(signal?:AbortSignal)=>request<User>('/auth/me',{signal}),
  login:(email:string,password:string)=>request<User>('/auth/login',{method:'POST',body:{email,password}}),
  logout:()=>request<void>('/auth/logout',{method:'POST'}),

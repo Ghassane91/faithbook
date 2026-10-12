@@ -5,3 +5,6 @@ export interface RunSummary { id:number; target_id:number; status:RunStatus; cap
 export interface Target { id:number; name:string; url:string; enabled:boolean; tags:string|null; account_id:number|null; next_run_at:string|null; last_run:RunSummary|null }
 export interface Run extends RunSummary { screenshot_path:string|null; screenshot_bytes:number|null; page_title:string|null; ai_summary:string|null; drive_status:'local'|'pending'|'uploaded'|'failed'; logs:Array<{id:number;ts:string;level:string;step:string;message:string}> }
 export interface RunPage { total:number; items:RunSummary[] }
+export interface HuntxArtifact {id:number;filename:string;kind:string;marketplace:string|null;image:boolean;drive_status:string;drive_url:string|null;folder_url:string|null;result_run_id:number|null;source_run_id:number;status:string|null;error:string|null}
+export interface HuntxRow {capture_date:string;row_key:string;row_label:string;artifacts:HuntxArtifact[]}
+export interface HuntxPage {total:number;items:HuntxRow[];dates:Array<{date:string;files:number}>;exports:Array<HuntxArtifact&{capture_date:string}>}

@@ -101,6 +101,8 @@ app.include_router(accounts.router)
 app.include_router(organizations.router)
 app.include_router(targets.router)
 app.include_router(runs.router)
+from app.api import huntx_archive
+app.include_router(huntx_archive.router)
 
 
 @app.get("/", include_in_schema=False)

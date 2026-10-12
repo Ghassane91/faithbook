@@ -4,6 +4,17 @@ import {request,api,ApiError,runsPath} from '../lib/faithbook-api.ts';
 import {dayInZone,pastWeek,successRate,safeUrl,sourceChannel,readableTime} from '../lib/faithbook-data.ts';
 const originalFetch=globalThis.fetch;
 afterEach(()=>{globalThis.fetch=originalFetch});
+
+test('HuntX historical filters preserve tenant, zero offset and encoded search',async()=>{
+ let seen;globalThis.fetch=async(url,init)=>{seen={url,init};return Response.json({items:[],total:0,dates:[],exports:[]})};
+ await api.huntxArchive(5,{query:'Walmart & Browning',limit:20,offset:0});
+ const params=new URLSearchParams(seen.url.split('?')[1]);assert.equal(params.get('query'),'Walmart & Browning');assert.equal(params.get('offset'),'0');assert.equal(params.has('capture_date'),false);assert.equal(seen.init.headers['X-Organization-ID'],'5');
+});
+test('HuntX previews retain membership scope and reject an HTML fallback',async()=>{
+ let seen;globalThis.fetch=async(url,init)=>{seen={url,init};return new Response('jpeg',{headers:{'content-type':'image/jpeg'}})};
+ assert.equal((await api.huntxFile(5,8,true)).type,'image/jpeg');assert.equal(seen.url,'/api/huntx/files/8?thumbnail=true');assert.equal(seen.init.headers['X-Organization-ID'],'5');
+ globalThis.fetch=async()=>new Response('<html/>',{headers:{'content-type':'text/html'}});await assert.rejects(api.huntxFile(5,8),e=>e.status===502);
+});
 test('requests include session cookie and explicit organization without tokens',async()=>{
  let seen;globalThis.fetch=async(url,init)=>{seen={url,init};return Response.json([])};
  await api.targets(3);assert.equal(seen.url,'/api/targets');assert.equal(seen.init.credentials,'same-origin');assert.equal(seen.init.cache,'no-store');assert.equal(seen.init.headers['X-Organization-ID'],'3');assert.equal(seen.init.headers.Authorization,undefined);
