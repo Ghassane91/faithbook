@@ -1,0 +1,118 @@
+/* Same HuntX palette as the complete FaithBook application. */
+:root, .dark {
+  color-scheme: dark;
+  --background: #08090b;
+  --foreground: #ffffff;
+  --card: #08090b;
+  --card-foreground: #ffffff;
+  --popover: #08090b;
+  --popover-foreground: #ffffff;
+  --primary: #cc5500;
+  --primary-foreground: #ffffff;
+  --secondary: #181c21;
+  --secondary-foreground: #ffffff;
+  --muted: #111418;
+  --muted-foreground: #bac3cc;
+  --accent: #291b14;
+  --accent-foreground: #e0724e;
+  --border: #303740;
+  --input: #303740;
+  --ring: #e0724e;
+  --sidebar: #0c0e10;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #cc5500;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #291b14;
+  --sidebar-accent-foreground: #e0724e;
+  --sidebar-border: #303740;
+  --sidebar-ring: #e0724e;
+  --chart-1: #cc5500;
+  --chart-2: #e0724e;
+  --chart-3: #8cba9f;
+  --chart-4: #bac3cc;
+  --chart-5: #ddb778;
+  --radius: .5rem;
+}
+html, body, .auth-page {background:var(--background);color:var(--foreground)}
+h1, h2, .detail-title, .metrics strong {
+  font-family:Inter,Arial,sans-serif;
+  font-weight:500;
+  color:var(--foreground);
+  letter-spacing:-.04em;
+}
+.auth-card h1 {font-size:clamp(34px,4vw,48px);line-height:1.2}
+.product, .product span, .nav-label, .sidebar-note, .workspace small,
+.profile small, .topbar, .lead, .muted, .date span, .date small,
+.live-date small, .auth-intro, .auth-card label, .archive-filters label,
+.live-date label, .org-workspace>label, .metrics p, .metrics small,
+.metrics em, .metrics p svg, .bar-col>span, .bar-col small, .legend,
+.source-button small, .cell-date, .same-line, .table-footer,
+.page-footer, .page-footer .muted, .capture-placeholder, .empty,
+.sheet-inner dt, .run-logs small, .viewer-help, .subtle-link,
+.legacy-link, .logout, .demo-label, .auth-page footer {color:var(--muted-foreground)}
+.eyebrow, .attention .eyebrow, .attention>svg {color:var(--accent-foreground)}
+.workspace, .profile, .topbar, .metrics, .metrics article,
+.table-footer, .sheet-inner dl>div, .run-logs>div {border-color:var(--border)}
+.activity, .attention, .capture-card, .capture-card-image,
+.capture-preview img, .lecture-carte, .lecture-image,
+.viewer-scroll, .detail-sheet, .capture-placeholder,
+.capture-viewer[data-slot='dialog-content'] {
+  background:var(--background);
+  color:var(--foreground);
+  border-color:var(--border);
+}
+.activity, .attention {border-radius:var(--radius)}
+.attention>p:not(.eyebrow), .attention button,
+.lecture-carte>header strong, .source-button strong, .time,
+.viewer-images h3 {color:var(--foreground)}
+.attention button, .lecture-carte>header, .lecture-carte>footer {border-color:var(--border)}
+.lecture-image::after {background:linear-gradient(transparent,var(--background))}
+.brand-sidebar [data-slot='sidebar-menu-button'] {color:var(--muted-foreground);border-radius:6px}
+.brand-sidebar [data-active='true'] {background:var(--accent);border-left-color:var(--primary);color:var(--accent-foreground)}
+.brand-sidebar [data-slot='sidebar-menu-button']:hover {background:var(--secondary);color:var(--foreground)}
+.avatar, .monogram {background:var(--secondary);color:var(--foreground);border-radius:6px}
+.demo-label>span {background:#8cba9f}
+.legend i, .bar, .bar-col:last-child .bar {background:var(--primary);border-color:var(--accent-foreground)}
+.primary-action {background:var(--primary);color:var(--primary-foreground);border-radius:6px}
+.primary-action:hover:not(:disabled) {background:#a94500}
+.auth-card input, .live-date input, .archive-filters select,
+.org-workspace select, .search, .search input {
+  background:var(--background);
+  color:var(--foreground);
+  border-color:var(--border);
+}
+input::placeholder {color:var(--muted-foreground)}
+.auth-card input {border-radius:6px}
+.collection table, .collection th, .collection td {
+  background:var(--background);
+  color:var(--foreground);
+  border-color:var(--border);
+}
+.collection tr:hover>td {background:var(--secondary)}
+.source-icon {border-color:var(--border);color:var(--foreground)}
+.filters button, .affichage button {color:var(--muted-foreground)}
+.filters button[aria-pressed='true'], .affichage button[aria-pressed='true'],
+.viewer-controls button[aria-pressed='true'] {
+  background:var(--accent);
+  border-color:var(--primary);
+  color:var(--accent-foreground);
+}
+.outline-action, .visit, .capture-actions button, .day-navigation button,
+.lecture-carte>footer a, .lecture-carte>footer button,
+.viewer-controls button, .table-footer nav button {
+  background:var(--background);
+  color:var(--foreground);
+  border-color:var(--border);
+}
+.day-navigation button:hover, .outline-action:hover,
+.capture-actions button:hover {background:var(--secondary)}
+.lecture-carte>header small, .capture-card-caption>span:not(.status),
+.capture-card-image>div {color:var(--muted-foreground)}
+.status.success {background:#17271f;border-color:#355343;color:#8cba9f}
+.status.warning {background:#30261a;border-color:#645031;color:#ddb778}
+.status.neutral {background:var(--secondary);border-color:var(--border);color:var(--foreground)}
+.api-error {background:#331f1f;border-color:#684239;color:#eea191}
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, .capture-card:focus-visible,
+.viewer-controls button:focus-visible, .viewer-scroll:focus-visible,
+.day-navigation button:focus-visible {outline:2px solid var(--ring);outline-offset:4px}
