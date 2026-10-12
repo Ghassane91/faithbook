@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { api, request } from '../api'
-import { dateHeure, useData } from '../lib'
+import { useData } from '../lib'
 
 export type CaptureBatch = {
   source_target_id: number; source_name: string; source_run_id: number; capture_date: string
@@ -9,7 +9,7 @@ export type CaptureBatch = {
   folders: {date: string; row_label: string; url: string}[]
   errors: {target_name: string; message: string}[]
 }
-export type CaptureDevice = {id: number; name: string; active: boolean; last_seen_at: string | null}
+export type CaptureDevice = {id: number; name: string; active: boolean; last_seen_at: string | null; next_at?: string | null}
 export type ZyteState = {enabled: boolean; configured: boolean; daily_limit: number | null}
 
 export function CaptureIcon({name, ...props}: {name: string; className?: string}) {
@@ -38,6 +38,10 @@ function displayDay(date: string) {
   return new Intl.DateTimeFormat('fr-FR', {day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'}).format(new Date(`${date}T12:00:00Z`))
 }
 
+function displaySlot(iso: string) {
+  return new Intl.DateTimeFormat('fr-FR', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca'}).format(new Date(iso))
+}
+
 export function HuntxOverview({onAller, onOuvrirRun, canAdmin, organizationId}: {
   onAller: (route: string) => void; onOuvrirRun: (id: number) => void; canAdmin: boolean; organizationId?: number
 }) {
@@ -47,8 +51,9 @@ export function HuntxOverview({onAller, onOuvrirRun, canAdmin, organizationId}: 
   const jobs = useData(() => api.jobs(), [organizationId], 30000)
   const source = archives.data?.sources.slice().sort((a, b) => b.capture_date.localeCompare(a.capture_date) || b.source_run_id - a.source_run_id)[0]
   const next = jobs.data?.find(job => job.target_id === source?.source_target_id)?.next_run_at
+    ?? devices.data?.find(device => device.active)?.next_at
   return <HuntxDashboard source={source} devices={devices.data ?? []} zyte={zyte.data ?? undefined}
-    nextCapture={next ? dateHeure(next) : undefined} error={archives.erreur ?? undefined}
+    nextCapture={next ? displaySlot(next) : undefined} error={archives.erreur ?? undefined}
     loading={!archives.data && !archives.erreur} onAller={onAller} onOuvrirRun={onOuvrirRun}
     onRefresh={() => {void archives.recharger(); void devices.recharger(); void zyte.recharger(); void jobs.recharger()}} />
 }
