@@ -5,11 +5,12 @@ import { RunDetail } from './components/RunDetail'
 import { delai, useData, useRoute } from './lib'
 import { ChangerMotDePasse } from './views/ChangerMotDePasse'
 import { AccepterInvitation } from './views/AccepterInvitation'
-import { Accueil } from './views/Accueil'
+import { HuntxOverview, HuntxMark } from './views/HuntxOverview'
 import { Cibles } from './views/Cibles'
 import { Comptes } from './views/Comptes'
 import { Connexion } from './views/Connexion'
 import { Historique } from './views/Historique'
+import { ChromePersonnel } from './views/ChromePersonnel'
 import { MentionsLegales } from './views/MentionsLegales'
 import { Organisation } from './views/Organisation'
 import { Planche } from './views/Planche'
@@ -17,12 +18,13 @@ import { Reinitialiser } from './views/Reinitialiser'
 import type { OrganizationUsage } from './types'
 
 const VUES = [
-  { cle: 'accueil', idx: '00', titre: 'Accueil', icon: 'board' },
-  { cle: 'planche', idx: '01', titre: 'Planche du jour', icon: 'board' },
-  { cle: 'cibles', idx: '02', titre: 'Cibles', icon: 'target' },
+  { cle: 'accueil', idx: '00', titre: 'Vue d’ensemble', icon: 'board' },
+  { cle: 'planche', idx: '01', titre: 'Captures du jour', icon: 'board' },
+  { cle: 'cibles', idx: '02', titre: 'Pages suivies', icon: 'target' },
   { cle: 'comptes', idx: '03', titre: 'Comptes', icon: 'account' },
   { cle: 'historique', idx: '04', titre: 'Historique', icon: 'history' },
   { cle: 'organisation', idx: '05', titre: 'Équipe', icon: 'team' },
+  { cle: 'chrome', idx: '06', titre: 'Chrome personnel', icon: 'target' },
 ]
 
 function dateEditoriale() {
@@ -158,9 +160,9 @@ function AppConnecte() {
               }
             }}
           >
-            FaithBook
+            <HuntxMark /> FaithBook<span className="brand-period">.</span>
           </span>
-          <span className="brand-sub">veille visuelle</span>
+          <span className="brand-sub">L’OBSERVATOIRE HUNTX</span>
           <span className="brand-registration" aria-hidden="true">
             <i />
             <i />
@@ -259,7 +261,7 @@ function AppConnecte() {
         </div>
       </nav>
 
-      <main className="main">
+      <main className="main" id="main-content">
         <header className="workspace-topbar">
           <span>
             FAITHBOOK <i>/</i> {vueActive?.titre ?? 'DOCUMENT'} <i>/</i> {dateEditoriale()}
@@ -272,7 +274,7 @@ function AppConnecte() {
 
         <div className="workspace-view" key={route}>
           {route === 'accueil' ? (
-            <Accueil onAller={aller} />
+            <HuntxOverview key={organisationActive?.id} onAller={aller} onOuvrirRun={setRunOuvert} canAdmin={canAdmin} organizationId={organisationActive?.id} />
           ) : route === 'cibles' ? (
             <Cibles
               onOuvrirRun={setRunOuvert}
@@ -283,6 +285,8 @@ function AppConnecte() {
             <Comptes canAdmin={canAdmin} />
           ) : route === 'historique' ? (
             <Historique onOuvrirRun={setRunOuvert} />
+          ) : route === 'chrome' ? (
+            <ChromePersonnel key={organisationActive?.id} canAdmin={canAdmin} organizationId={organisationActive?.id} onOuvrirRun={setRunOuvert} />
           ) : route === 'organisation' ? (
             <Organisation
               organization={organisationActive ?? null}
