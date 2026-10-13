@@ -45,6 +45,20 @@ def workspaces(user=Depends(current_user), session: Session = Depends(get_sessio
     return [dict(organization_id=org_id, files=count) for org_id, count in rows]
 
 
+@router.get("/zyte")
+def zyte_status(context=Depends(current_organization)):
+    """Read-only provider status; never expose credentials or another tenant's setup."""
+    scoped = getattr(settings, "zyte_organization_id", 0) == context.organization.id
+    configured = False
+    if scoped:
+        from app.services.zyte_capture import api_key
+        configured = bool(api_key())
+    return dict(enabled=scoped and getattr(settings, "zyte_enabled", False),
+                configured=configured,
+                daily_limit=getattr(settings, "zyte_daily_limit", None) if scoped else None,
+                mode="fallback", attempts_per_link=1)
+
+
 def artifact_out(artifact, session):
     suffix = Path(artifact.filename).suffix.lower()
     run = session.get(Run, artifact.result_run_id) if artifact.result_run_id else None

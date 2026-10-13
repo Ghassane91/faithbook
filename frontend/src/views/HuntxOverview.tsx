@@ -42,12 +42,12 @@ function displaySlot(iso: string) {
   return new Intl.DateTimeFormat('fr-FR', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca'}).format(new Date(iso))
 }
 
-export function HuntxOverview({onAller, onOuvrirRun, canAdmin, organizationId}: {
+export function HuntxOverview({onAller, onOuvrirRun, organizationId}: {
   onAller: (route: string) => void; onOuvrirRun: (id: number) => void; canAdmin: boolean; organizationId?: number
 }) {
   const archives = useData(() => request<{sources: CaptureBatch[]}>('/browser-capture/archive'), [organizationId], 30000)
   const devices = useData(() => request<CaptureDevice[]>('/browser-capture/devices'), [organizationId], 30000)
-  const zyte = useData(() => canAdmin ? request<ZyteState>('/browser-capture/zyte') : Promise.resolve(null), [organizationId, canAdmin], 30000)
+  const zyte = useData(() => request<ZyteState>('/huntx/zyte'), [organizationId], 30000)
   const jobs = useData(() => api.jobs(), [organizationId], 30000)
   const source = archives.data?.sources.slice().sort((a, b) => b.capture_date.localeCompare(a.capture_date) || b.source_run_id - a.source_run_id)[0]
   const next = jobs.data?.find(job => job.target_id === source?.source_target_id)?.next_run_at

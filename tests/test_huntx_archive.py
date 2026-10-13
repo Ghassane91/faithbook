@@ -74,6 +74,22 @@ def test_archive_requires_authentication(client):
     assert client.get('/api/huntx/archive').status_code == 401
     assert client.get('/api/huntx/workspaces').status_code == 401
     assert client.get('/api/huntx/files/1').status_code == 401
+    assert client.get('/api/huntx/zyte').status_code == 401
+
+
+def test_zyte_status_is_readable_by_viewers_without_credentials_or_tenant_leak(archive_data, monkeypatch):
+    from app.services import zyte_capture
+    client, (org, private, _, _) = archive_data
+    monkeypatch.setattr(settings, 'zyte_enabled', True)
+    monkeypatch.setattr(settings, 'zyte_organization_id', org)
+    monkeypatch.setattr(settings, 'zyte_daily_limit', 30)
+    monkeypatch.setattr(zyte_capture, 'api_key', lambda:'never-expose-this-key')
+    r = client.get('/api/huntx/zyte', headers={'X-Organization-ID':str(org)})
+    assert r.status_code == 200 and r.json() == dict(enabled=True,configured=True,daily_limit=30,mode='fallback',attempts_per_link=1)
+    assert 'never-expose-this-key' not in r.text
+    monkeypatch.setattr(settings, 'zyte_organization_id', private)
+    assert client.get('/api/huntx/zyte',headers={'X-Organization-ID':str(org)}).json() == dict(enabled=False,configured=False,daily_limit=None,mode='fallback',attempts_per_link=1)
+    assert client.get('/api/huntx/zyte',headers={'X-Organization-ID':str(private)}).status_code == 403
 
 
 def test_archive_viewer_can_read_image_and_thumbnail_and_missing_is_explicit(archive_data):
