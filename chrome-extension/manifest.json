@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "FaithBook — Chrome personnel",
+  "version": "1.3.1",
+  "minimum_chrome_version": "125",
+  "description": "Capture les fiches produits extraites de HuntX dans FaithBook avec votre Chrome personnel.",
+  "permissions": [
+    "alarms",
+    "storage",
+    "debugger",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.walmart.com/*",
+    "https://www.academy.com/*",
+    "https://www.basspro.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "worker.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Configurer FaithBook Chrome"
+  }
+}

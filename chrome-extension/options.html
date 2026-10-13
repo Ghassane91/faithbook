@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>FaithBook — Chrome personnel</title>
+<link rel="stylesheet" href="options.css"></head><body>
+<main><h1>Chrome personnel</h1>
+<p>Fiches produits HuntX et captures planifiées · votre PC et Chrome doivent rester ouverts.</p>
+<p>Créez l’appairage dans FaithBook → Chrome personnel, puis collez son code ici. Le PC doit être allumé et Chrome ouvert. Les cookies du navigateur ne sont pas exportés.</p>
+<form id="config"><label>Adresse de FaithBook<input id="origin" type="url" required placeholder="https://faithbook.exemple.com"></label>
+<label>Code d’appairage<input id="token" type="password" required autocomplete="off"></label>
+<button>Lier ce Chrome</button></form>
+<button id="test">Tester les trois pages de contrôle</button>
+<p>Les captures s’exécutent successivement, à environ une minute d’intervalle. Chrome peut afficher un bandeau de débogage pendant la capture de l’onglet créé par l’extension.</p>
+<p id="status" role="status"></p></main><script type="module" src="options.js"></script></body></html>
