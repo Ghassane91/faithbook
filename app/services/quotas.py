@@ -5,11 +5,11 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Account, Organization, Run, Target
+from app.models import Account, Organization, Run, Target, BrowserTarget, BrowserLinkJob, HuntxDriveArtifact
 from app.services.capture import legacy_thumb_path, thumb_path
 
 
@@ -108,7 +108,9 @@ def _target_count(session: Session, organization_id: int) -> int:
         session.scalar(
             select(func.count())
             .select_from(Target)
+            .outerjoin(BrowserTarget, BrowserTarget.target_id == Target.id)
             .where(Target.organization_id == organization_id)
+            .where(BrowserTarget.source_target_id.is_(None))
         )
         or 0
     )
@@ -290,6 +292,15 @@ def purge_expired_runs(
             )
         ).all()
         for run in runs:
+            waiting_artifact = session.scalar(select(HuntxDriveArtifact.id).where(
+                or_(HuntxDriveArtifact.source_run_id == run.id, HuntxDriveArtifact.result_run_id == run.id),
+                HuntxDriveArtifact.drive_status != 'uploaded').limit(1))
+            waiting_product = session.scalar(select(BrowserLinkJob.id).where(
+                BrowserLinkJob.source_run_id == run.id, BrowserLinkJob.finished_at.is_(None)).limit(1))
+            if waiting_artifact or waiting_product:
+                continue  # Retention must never erase the only copy awaiting Drive.
+            paths.extend(session.scalars(select(HuntxDriveArtifact.local_path).where(
+                or_(HuntxDriveArtifact.source_run_id == run.id, HuntxDriveArtifact.result_run_id == run.id))).all())
             if run.screenshot_path:
                 screenshot = Path(run.screenshot_path)
                 paths.extend(

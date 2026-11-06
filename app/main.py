@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import accounts
+from app.api import browser_capture
 from app.api import auth as auth_api
 from app.api import organizations, runs, system, targets
 from app.config import settings
@@ -103,6 +104,7 @@ app.include_router(targets.router)
 app.include_router(runs.router)
 from app.api import huntx_archive
 app.include_router(huntx_archive.router)
+app.include_router(browser_capture.router)
 
 
 @app.get("/", include_in_schema=False)

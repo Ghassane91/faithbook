@@ -25,6 +25,7 @@ PURGE_JOB_ID = "purge-old-runs"
 SESSION_CHECK_JOB_ID = "session-check"
 DAILY_REPORT_JOB_ID = "daily-report"
 DRIVE_RETRY_JOB_ID = "drive-retry"
+HUNTX_DRIVE_JOB_ID = "huntx-drive-retry"
 CATCHUP_JOB_ID = "catchup-missed"
 
 
@@ -47,6 +48,10 @@ def build_trigger(target: Target) -> CronTrigger | IntervalTrigger:
 
 
 async def _run_scheduled(target_id: int) -> None:
+    from app.models import BrowserTarget
+    with session_scope() as session:
+        if session.get(BrowserTarget, target_id):
+            return
     try:
         run_id, status, detail = await trigger_target(target_id, TriggerType.scheduled)
         logger.info("Cible %s planifiee -> run=%s %s (%s)", target_id, run_id, status, detail)
@@ -59,6 +64,11 @@ def schedule_target(target: Target) -> None:
     jid = job_id_for(target.id)
     if scheduler.get_job(jid):
         scheduler.remove_job(jid)
+
+    from app.models import BrowserTarget
+    with session_scope() as session:
+        if session.get(BrowserTarget, target.id):
+            return  # Le Chrome appairé retire les échéances auprès de l'API.
 
     if not target.enabled or not (
         target.run_time or target.cron_expression or target.interval_minutes
@@ -90,6 +100,16 @@ def unschedule_target(target_id: int) -> None:
 
 
 def next_run_for(target_id: int) -> datetime | None:
+    from app.models import BrowserDevice, BrowserTarget, utcnow
+    from app.services.browser_schedule import aware, next_slot
+    with session_scope() as session:
+        binding = session.get(BrowserTarget, target_id)
+        if binding:
+            target = session.get(Target, target_id)
+            device = session.get(BrowserDevice, binding.device_id)
+            if target.enabled and device.active and aware(device.expires_at) > utcnow():
+                return datetime.fromisoformat(next_slot(utcnow()))
+            return None
     job = scheduler.get_job(job_id_for(target_id))
     return getattr(job, "next_run_time", None) if job else None
 
@@ -124,6 +144,14 @@ def _drive_retry_job() -> None:
         drive_sync.retry_due_uploads()
     except Exception:
         logger.exception("Reprise automatique Google Drive en erreur")
+
+
+def _huntx_drive_retry_job() -> None:
+    try:
+        from app.services.huntx_drive import retry_due_artifacts
+        retry_due_artifacts()
+    except Exception:
+        logger.exception("Envoi des lignes et fiches HuntX sur Drive en erreur")
 
 
 def _cron_at(hhmm: str) -> CronTrigger | None:
@@ -199,6 +227,22 @@ def start_scheduler() -> None:
             "Reprise Google Drive planifiée toutes les %s minute(s)",
             max(1, settings.google_drive_retry_minutes),
         )
+    from app.services.drive import drive_client
+    if drive_client.is_configured():
+        scheduler.add_job(
+            _huntx_drive_retry_job, trigger="interval", minutes=1,
+            id=HUNTX_DRIVE_JOB_ID, replace_existing=True, max_instances=1, coalesce=True,
+        )
+    if settings.zyte_enabled:
+        from app.services.zyte_capture import scheduled_fallback
+        scheduler.add_job(scheduled_fallback, trigger="interval", minutes=1,
+                          id="zyte-fallback", replace_existing=True,
+                          max_instances=1, coalesce=True)
+    if settings.brightdata_enabled:
+        from app.services.brightdata_capture import scheduled_fallback as brightdata_fallback
+        scheduler.add_job(brightdata_fallback, trigger="interval", minutes=1,
+                          id="brightdata-fallback", replace_existing=True,
+                          max_instances=1, coalesce=True)
     count = load_all_targets()
     if settings.catchup_missed_runs:
         # Differe de quelques secondes : la base et le worker doivent etre prets.

@@ -47,6 +47,9 @@ def main() -> int:
             select(Run).where(Run.status.in_([RunStatus.pending, RunStatus.running]))
         ).all()
         for run in orphaned:
+            # Paid provider reservations must never be requeued as Chrome captures.
+            if (run.idempotency_key or '').startswith('brightdata:'):
+                continue
             if run.id not in queued_ids:
                 run.status = RunStatus.pending
                 run_queue.enqueue_recovered(

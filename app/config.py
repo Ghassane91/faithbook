@@ -2,6 +2,7 @@ from functools import lru_cache
 import ipaddress
 from typing import Literal
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,23 @@ class Settings(BaseSettings):
 
     # API
     api_port: int = 8000
+    # Optional paid Web Unlocker fallback. Two reserved requests per capture.
+    brightdata_enabled: bool = False
+    brightdata_api_key: SecretStr = SecretStr("")
+    brightdata_api_key_file: str = "/secrets/brightdata-api-key"
+    brightdata_zone: str = ""
+    brightdata_organization_id: int = 0
+    brightdata_daily_limit: int = Field(default=30, ge=2, le=1000)
+    # Browser API is scoped to HuntX fallback jobs, never global capture routing.
+    brightdata_browser_enabled: bool = False
+    brightdata_browser_endpoint_file: str = "/secrets/brightdata-browser-endpoint"
+    brightdata_browser_daily_limit: int = Field(default=3, ge=1, le=100)
+    # Zyte: public merchant pages only; disabled until explicitly configured.
+    zyte_enabled: bool = False
+    zyte_api_key: SecretStr = SecretStr("")
+    zyte_api_key_file: str = "/secrets/zyte-api-key"
+    zyte_organization_id: int = 0
+    zyte_daily_limit: int = Field(default=30, ge=1, le=1000)
     # Cle machine-a-machine pour les scripts. N'a rien a voir avec les comptes
     # utilisateurs : elle ne donne acces qu'a l'API, jamais a l'interface.
     api_key: str = ""
@@ -91,6 +109,15 @@ class Settings(BaseSettings):
     # Proxy sortant qui applique une seconde barriere reseau (ACL Squid) apres
     # les validations applicatives. Configure automatiquement par Compose.
     browser_proxy_url: str = ""
+
+    # Navigateur distant pour les pages publiques explicitement selectionnees.
+    # Inactif tant que le fournisseur et son endpoint ne sont pas configures.
+    remote_browser_provider: Literal["disabled", "brightdata", "cdp"] = "disabled"
+    remote_browser_cdp_url: SecretStr = Field(default=SecretStr(""), repr=False)
+    remote_browser_domains: str = "walmart.com,academy.com,basspro.com,cabelas.com"
+    remote_browser_timeout_seconds: int = Field(default=120, ge=15, le=300)
+    local_browser_grace_seconds: int = Field(default=20, ge=0, le=60)
+    browser_channel: Literal["", "chrome", "msedge"] = ""
 
     # Planification
     timezone: str = "UTC"
@@ -211,9 +238,8 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-flash-lite-latest"
     gemini_timeout_seconds: int = 90
 
-    # Fiches produit HuntX : marketplaces a ne pas tenter (anti-robot
-    # systematique constate le 29/09/2026). Vide = tout tenter.
-    fiches_marketplaces_ignorees: str = "Walmart,Academy,Bass Pro - Cabela's"
+    # Vide = tenter aussi les trois enseignes avec le navigateur local.
+    fiches_marketplaces_ignorees: str = ""
 
     # --- Canaux d alerte complementaires (vides = inactifs) ---
     notify_telegram_bot_token: str = ""

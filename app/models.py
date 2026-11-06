@@ -29,6 +29,73 @@ class Base(DeclarativeBase):
     pass
 
 
+class BrowserDevice(Base):
+    __tablename__ = "browser_devices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserTarget(Base):
+    __tablename__ = "browser_targets"
+    target_id: Mapped[int] = mapped_column(ForeignKey("targets.id", ondelete="CASCADE"), primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("browser_devices.id", ondelete="CASCADE"), index=True)
+    source_target_id: Mapped[int | None] = mapped_column(ForeignKey("targets.id", ondelete="CASCADE"), index=True)
+    completed_slot: Mapped[str | None] = mapped_column(String(40))
+    manual_key: Mapped[str | None] = mapped_column(String(40))
+    lease_key: Mapped[str | None] = mapped_column(String(40))
+    lease_hash: Mapped[str | None] = mapped_column(String(64))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_result_key: Mapped[str | None] = mapped_column(String(40))
+    last_run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+
+
+class BrowserLinkJob(Base):
+    __tablename__ = "browser_link_jobs"
+    __table_args__ = (UniqueConstraint("target_id", "source_run_id", name="uq_browser_link_source"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("browser_targets.target_id", ondelete="CASCADE"), index=True)
+    source_run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    result_run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    row_references: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class HuntxDriveArtifact(Base):
+    """Fichier HuntX conservé localement jusqu'à son archivage Drive confirmé."""
+
+    __tablename__ = "huntx_drive_artifacts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    result_run_id: Mapped[int | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"), index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    capture_date: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
+    row_key: Mapped[str | None] = mapped_column(String(200))
+    row_label: Mapped[str | None] = mapped_column(String(240))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    marketplace: Mapped[str | None] = mapped_column(String(160))
+    local_path: Mapped[str] = mapped_column(Text, nullable=False)
+    filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    drive_status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", nullable=False, index=True)
+    drive_folder_id: Mapped[str | None] = mapped_column(Text)
+    drive_file_id: Mapped[str | None] = mapped_column(Text)
+    drive_file_link: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class RunStatus(str, enum.Enum):
     pending = "pending"
     running = "running"

@@ -25,11 +25,13 @@ import subprocess
 import sys
 import time
 import unicodedata
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import settings
+from app.services.web_challenges import WebChallenge, detect_challenge
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +77,10 @@ JS_PRIX = r"""
   for (const tr of table.querySelectorAll('tbody tr[data-id]')) {
     const cells = [...tr.children];
     const ligne = {
+      id: tr.dataset.id,
       marque: (cells[0]?.innerText || '').trim(),
       modele: (cells[1]?.innerText || '').trim().split('\n')[0],
+      captured_at: new Date().toISOString(),
       cellules: {},
     };
     cells.forEach((td, i) => {
@@ -113,15 +117,6 @@ MARKETPLACES_PAR_DOMAINE = (
     ("basspro.", "Bass Pro - Cabela's"),
     ("cabelas.", "Bass Pro - Cabela's"),
 )
-
-# Pages anti-robot : reconnues au texte, jamais envoyees sur Drive.
-MARQUEURS_BLOCAGE = (
-    "robot or human", "verify you are human", "verify you are a human", "are you a robot",
-    "captcha", "access denied", "enter the characters you see",
-    "sorry, we just need to make sure you're not a robot", "press & hold",
-    "request unsuccessful", "pardon our interruption",
-)
-
 
 @dataclass(frozen=True)
 class Lien:
@@ -185,10 +180,11 @@ def marketplaces_ignorees() -> set[str]:
 
 
 def est_bloquee(texte: str | None) -> bool:
-    bas = (texte or "").lower()
-    if len(bas.strip()) < 300:
+    contenu = texte or ""
+    if len(contenu.strip()) < 300:
         return True
-    return any(m in bas for m in MARQUEURS_BLOCAGE)
+    # Une notice reCAPTCHA dans le pied de page n'est pas un interstitiel.
+    return detect_challenge("", contenu) is not None
 
 
 async def capturer_lignes(page, dossier: Path) -> list[dict]:
@@ -212,29 +208,47 @@ async def capturer_lignes(page, dossier: Path) -> list[dict]:
         rangees = table.locator("tbody tr[data-id]")
         for i in range(await rangees.count()):
             rangee = rangees.nth(i)
-            cellules = rangee.locator("td")
-            marque = (await cellules.nth(0).inner_text()).strip()
-            modele = (await cellules.nth(1).inner_text()).strip().split("\n")[0]
-            nom = nettoyer(f"{marque} - {modele}") + ".jpg"
-            if nom in vus:
-                continue
-            vus.add(nom)
-            await rangee.scroll_into_view_if_needed()
-            image = Image.open(BytesIO(await rangee.screenshot(type="png"))).convert("RGB")
-            largeur = max(entete.width, image.width)
-            composee = Image.new("RGB", (largeur, entete.height + image.height), (0, 0, 0))
-            composee.paste(entete, (0, 0))
-            composee.paste(image, (0, entete.height))
             chemin = dossier / f"ligne-{i:04d}.jpg"
-            composee.save(chemin, "JPEG", quality=85)
-            lignes.append({"fichier": str(chemin), "nom": nom})
+            metadata = {"fichier": str(chemin), "nom": f"Ligne {i + 1}.jpg", "id": "",
+                        "marque": "", "modele": ""}
+            try:
+                cellules = rangee.locator("td")
+                metadata["marque"] = (await cellules.nth(0).inner_text()).strip()
+                metadata["modele"] = (await cellules.nth(1).inner_text()).strip().split("\n")[0]
+                metadata["id"] = (await rangee.get_attribute("data-id") or "").strip()
+                row_key = metadata["id"] or str(i)
+                if row_key in vus:
+                    continue
+                vus.add(row_key)
+                metadata["nom"] = nettoyer(f"{metadata['marque']} - {metadata['modele']}") + ".jpg"
+                # Une ligne détachée momentanément du DOM est retentée ; un
+                # échec permanent n'empêche pas les lignes suivantes de passer.
+                for attempt in range(3):
+                    try:
+                        await rangee.scroll_into_view_if_needed()
+                        image = Image.open(BytesIO(await rangee.screenshot(type="png"))).convert("RGB")
+                        break
+                    except Exception:  # noqa: BLE001 - course de rendu d'une ligne
+                        if attempt == 2:
+                            raise
+                        await asyncio.sleep(0.5)
+                largeur = max(entete.width, image.width)
+                composee = Image.new("RGB", (largeur, entete.height + image.height), (0, 0, 0))
+                composee.paste(entete, (0, 0))
+                composee.paste(image, (0, entete.height))
+                composee.save(chemin, "JPEG", quality=85)
+            except Exception as exc:  # noqa: BLE001 - conserver le statut, puis passer à la ligne suivante
+                metadata["capture_error"] = str(exc)[:1000]
+                logger.warning("Image HuntX ligne %s indisponible : %s", metadata["id"] or i + 1, exc)
+            metadata["captured_at"] = datetime.now(timezone.utc).isoformat()
+            lignes.append(metadata)
     except Exception:  # noqa: BLE001 - la capture principale reste valable
         logger.warning("Images par ligne impossibles (%d faites)", len(lignes), exc_info=True)
     return lignes
 
 
 def envoyer_lignes(lignes: list[dict], capture_date: str, run_id: int | None = None) -> int:
-    """Envoie les images de lignes sur Drive, puis les efface du disque."""
+    """Ancien export direct ; conserve les images, même si Drive est indisponible."""
     from app.services.drive import drive_client
 
     if not lignes or not drive_client.is_configured():
@@ -250,8 +264,6 @@ def envoyer_lignes(lignes: list[dict], capture_date: str, run_id: int | None = N
                 envoyees += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning("Ligne %s non envoyee : %s", ligne["nom"], exc)
-        finally:
-            chemin.unlink(missing_ok=True)
     _journaliser(run_id, f"Lignes par caméra : {envoyees}/{len(lignes)} image(s) envoyée(s) "
                          f"sur Drive ({DOSSIER_LIGNES}/{capture_date}/).")
     return envoyees
@@ -306,8 +318,6 @@ def envoyer_prix(prix: list[dict], capture_date: str, run_id: int | None = None)
     except Exception as exc:  # noqa: BLE001 - les lignes et les fiches passent quand meme
         _journaliser(run_id, f"Tableau des prix non envoyé : {exc}", "ERROR")
         return False
-    finally:
-        chemin.unlink(missing_ok=True)
     _journaliser(run_id, f"Prix par marketplace : {len(prix)} produit(s) -> Drive ({DOSSIER_PRIX}/{nom}).")
     return True
 
@@ -371,7 +381,7 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
         _journaliser(run_id, "Fiches produit : Drive non configuré, rien n'est envoyé.", "ERROR")
         return bilan
 
-    travail = Path(settings.screenshot_dir) / "fiches-liens" / capture_date
+    travail = Path(settings.screenshot_dir) / "fiches-liens" / capture_date / f"run-{run_id or 'legacy'}"
     travail.mkdir(parents=True, exist_ok=True)
     dossiers: dict[str, str] = {}
     racine = drive_client.ensure_folder(DOSSIER_RACINE, settings.google_drive_parent_folder_id or None)
@@ -388,20 +398,19 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
                 bilan["bloquees"] += 1
                 logger.info("Fiche %s (%s) : page anti-robot, non envoyee", lien.url, lien.marketplace)
             else:
-                bilan["ok"] += 1
                 if lien.marketplace not in dossiers:
                     dossiers[lien.marketplace] = drive_client.ensure_folder(lien.marketplace, jour)
                 await asyncio.to_thread(drive_client.upload, fichier_local,
                                         dossiers[lien.marketplace], lien.nom_fichier)
+                bilan["ok"] += 1
         except Exception as exc:  # noqa: BLE001 - une fiche en echec n'arrete pas les autres
             texte = str(exc)
-            if "HTTP 403" in texte or "HTTP 429" in texte or "ERR_HTTP2_PROTOCOL_ERROR" in texte:
+            if (isinstance(exc, WebChallenge) or "HTTP 403" in texte or "HTTP 429" in texte
+                    or "ERR_HTTP2_PROTOCOL_ERROR" in texte):
                 bilan["bloquees"] += 1  # le marchand refuse les robots : rien a capturer
             else:
                 bilan["erreurs"] += 1
             logger.warning("Fiche %s (%s) : %s", lien.url, lien.marketplace, texte.splitlines()[0][:200])
-        finally:
-            fichier_local.unlink(missing_ok=True)
         if n % 25 == 0:
             logger.info("Fiches produit : %d/%d", n, len(liens))
         await asyncio.sleep(pause_s)
@@ -419,9 +428,22 @@ async def capturer_tout(liens: list[Lien], capture_date: str, run_id: int | None
 def main(chemin: str) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     donnees = json.loads(Path(chemin).read_text(encoding="utf-8"))
-    # D'abord le tableau des prix et les lignes HuntX : rapides et jamais bloques.
-    envoyer_prix(donnees.get("prix") or [], donnees["date"], donnees.get("run_id"))
-    envoyer_lignes(donnees.get("lignes") or [], donnees["date"], donnees.get("run_id"))
+    # L'archivage durable précède la file Chrome. Les photos restent sur le
+    # serveur et le planificateur réessaie Drive indépendamment des captures.
+    # An enrolled Chrome handles all original product URLs, including merchants
+    # omitted by the legacy server-side marketplace filter.
+    from app.database import session_scope
+    from app.services.browser_links import enqueue_links
+    from app.services.huntx_drive import register_source_artifacts
+    with session_scope() as session:
+        artifacts = register_source_artifacts(session, donnees["run_id"],
+            donnees.get("lignes") or [], donnees.get("prix") or [], donnees["date"])
+        queued = enqueue_links(session, donnees.get("run_id"), donnees.get("liens") or [])
+    logger.info("Archivage HuntX durable : %d fichier(s) en file Drive", len(artifacts))
+    if queued is not None:
+        logger.info("Fiches confiées au Chrome personnel : %s", queued)
+        Path(chemin).unlink(missing_ok=True)
+        return 0
     liens = depuis_json(donnees.get("liens") or [])
     ignorees = marketplaces_ignorees()
     exclus = [l for l in liens if l.marketplace.casefold() in ignorees]

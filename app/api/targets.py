@@ -159,6 +159,12 @@ def update_target(
     target = _owned_target(session, target_id, context)
 
     changes = payload.model_dump(exclude_unset=True)
+    from app.models import BrowserTarget
+    if session.get(BrowserTarget, target_id):
+        forbidden = {field for field, value in changes.items()
+                     if field not in {"name", "enabled", "tags"} and getattr(target, field) != value}
+        if forbidden:
+            raise HTTPException(422, "Cette cible est pilotée par Chrome personnel : URL et calendrier fixes.")
     if "url" in changes:
         _check_target_url(changes["url"])
     if "account_id" in changes:

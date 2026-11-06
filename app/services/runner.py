@@ -50,6 +50,8 @@ from app.services.notify import (
 )
 from app.services.session_check import encrypted_state_to_storage
 from app.services.ssrf import UrlRejected
+from app.services.web_challenges import WebChallenge
+from app.services.remote_browser import RemoteBrowserError
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +208,17 @@ async def execute_run(run_id: int, force: bool = False) -> None:
                     )
                     session.commit()
                     log_step(session, run, "dedupe", str(exc), attempt=attempt)
+                    return
+                except (WebChallenge, RemoteBrowserError) as exc:
+                    # Pas de boucle identique sur un challenge, ni de
+                    # multiplication des sessions distantes facturables.
+                    run.status = RunStatus.failed
+                    run.error_message = str(exc)
+                    run.finished_at = utcnow()
+                    run.duration_ms = _elapsed_ms(run)
+                    session.commit()
+                    log_step(session, run, "web_access", str(exc), level="WARNING", attempt=attempt)
+                    notify_failure(target, run)
                     return
                 except SessionExpired as exc:
                     # Une reconnexion/2FA ne sera jamais réparée par un retry.
@@ -758,6 +771,9 @@ async def trigger_target(
         target = session.get(Target, target_id)
         if target is None:
             raise LookupError("Cible introuvable")
+        from app.models import BrowserTarget
+        if session.get(BrowserTarget, target_id):
+            raise RuntimeError("Cible Chrome : utilisez Tester dans Chrome personnel.")
         capture_date = local_now(target).strftime("%Y-%m-%d")
 
         if not force and settings.dedupe_mode in ("per_day", "both"):

@@ -48,19 +48,20 @@ export function HuntxOverview({onAller, onOuvrirRun, organizationId}: {
   const archives = useData(() => request<{sources: CaptureBatch[]}>('/browser-capture/archive'), [organizationId], 30000)
   const devices = useData(() => request<CaptureDevice[]>('/browser-capture/devices'), [organizationId], 30000)
   const zyte = useData(() => request<ZyteState>('/huntx/zyte'), [organizationId], 30000)
+  const brightdata = useData(() => request<ZyteState>('/huntx/brightdata'), [organizationId], 30000)
   const jobs = useData(() => api.jobs(), [organizationId], 30000)
   const source = archives.data?.sources.slice().sort((a, b) => b.capture_date.localeCompare(a.capture_date) || b.source_run_id - a.source_run_id)[0]
   const next = jobs.data?.find(job => job.target_id === source?.source_target_id)?.next_run_at
     ?? devices.data?.find(device => device.active)?.next_at
-  return <HuntxDashboard source={source} devices={devices.data ?? []} zyte={zyte.data ?? undefined}
+  return <HuntxDashboard source={source} devices={devices.data ?? []} zyte={zyte.data ?? undefined} brightdata={brightdata.data ?? undefined}
     nextCapture={next ? displaySlot(next) : undefined} error={archives.erreur ?? undefined}
     loading={!archives.data && !archives.erreur} onAller={onAller} onOuvrirRun={onOuvrirRun}
-    onRefresh={() => {void archives.recharger(); void devices.recharger(); void zyte.recharger(); void jobs.recharger()}} />
+    onRefresh={() => {void archives.recharger(); void devices.recharger(); void zyte.recharger(); void brightdata.recharger(); void jobs.recharger()}} />
 }
 
-export function HuntxDashboard({source, devices = [], zyte, nextCapture, loading = false, error,
+export function HuntxDashboard({source, devices = [], zyte, brightdata, nextCapture, loading = false, error,
   onAller, onOuvrirRun, onRefresh, preview = false}: {
-  source?: CaptureBatch; devices?: CaptureDevice[]; zyte?: ZyteState; nextCapture?: string
+  source?: CaptureBatch; devices?: CaptureDevice[]; zyte?: ZyteState; brightdata?: ZyteState; nextCapture?: string
   loading?: boolean; error?: string; preview?: boolean
   onAller: (route: string) => void; onOuvrirRun: (id: number) => void; onRefresh: () => void
 }) {
@@ -94,7 +95,7 @@ export function HuntxDashboard({source, devices = [], zyte, nextCapture, loading
       <div className="hx-folder-list">{folders.slice(0,4).map(folder => <a className="hx-folder" key={`${folder.date}-${folder.row_label}`} href={folder.url} target="_blank" rel="noopener noreferrer"><span className="hx-folder-icon"><CaptureIcon name="folder"/></span><span><strong>{folder.row_label}</strong><small>{displayDay(folder.date)} · Dossier Drive</small></span><CaptureIcon name="external"/></a>)}{!folders.length && <p className="hx-empty">{query ? 'Aucune ligne ne correspond dans les dossiers affichés.' : loading ? 'Chargement des dossiers…' : 'Aucun dossier disponible pour cette campagne.'}</p>}</div>
       <div className="hx-archive-foot"><button className="hx-text-button" onClick={() => onAller('huntx')}>Tous les aperçus HuntX <CaptureIcon name="arrow"/></button><button className="hx-text-button" disabled={!source} onClick={() => source && onOuvrirRun(source.source_run_id)}>Voir le tableau <CaptureIcon name="arrow"/></button></div>
     </article>
-    <article className="hx-panel hx-services"><span className="hx-overline">VOTRE CHAÎNE DE COLLECTE</span><h2>Chaque étape compte.</h2><div className="hx-service"><span className="hx-service-icon"><CaptureIcon name="browser"/></span><div><strong>Chrome personnel</strong><small>{connected ? connected.name : 'Appareil en attente de contact'}</small></div><span className={`hx-state ${connected ? 'ok' : ''}`}>{connected ? 'Connecté' : 'À vérifier'}</span></div><div className="hx-service"><span className="hx-service-icon zyte">Z</span><div><strong>Zyte API</strong><small>Secours après blocage Chrome</small></div><span className={`hx-state ${zyte?.enabled && zyte.configured ? 'ok' : ''}`}>{zyte ? zyte.enabled && zyte.configured ? 'Activé' : 'Inactif' : '—'}</span></div><div className="hx-service"><span className="hx-service-icon"><CaptureIcon name="folder"/></span><div><strong>Google Drive</strong><small>{source ? `${source.drive_uploaded} fichiers archivés` : 'Archivage par date et ligne'}</small></div><span className={`hx-state ${source && !source.drive_failed ? 'ok' : ''}`}>{source?.drive_failed ? 'À reprendre' : source ? source.drive_pending ? 'Envoi en cours' : 'À jour' : '—'}</span></div><p className="hx-service-note"><CaptureIcon name="check"/>L’historique reste conservé à chaque reprise.</p><button className="hx-text-button" onClick={() => onAller('chrome')}>Gérer la collecte< CaptureIcon name="arrow"/></button></article></div>
+    <article className="hx-panel hx-services"><span className="hx-overline">VOTRE CHAÎNE DE COLLECTE</span><h2>Chaque étape compte.</h2><div className="hx-service"><span className="hx-service-icon"><CaptureIcon name="browser"/></span><div><strong>Chrome personnel</strong><small>{connected ? connected.name : 'Appareil en attente de contact'}</small></div><span className={`hx-state ${connected ? 'ok' : ''}`}>{connected ? 'Connecté' : 'À vérifier'}</span></div><div className="hx-service"><span className="hx-service-icon zyte">Z</span><div><strong>Zyte API</strong><small>Secours après blocage Chrome</small></div><span className={`hx-state ${zyte?.enabled && zyte.configured ? 'ok' : ''}`}>{zyte ? zyte.enabled && zyte.configured ? 'Activé' : 'Inactif' : '—'}</span></div><div className="hx-service"><span className="hx-service-icon">B</span><div><strong>Bright Data Web Unlocker</strong><small>Secours payant · deux appels réservés par capture</small></div><span className={`hx-state ${brightdata?.enabled && brightdata.configured ? 'ok' : ''}`}>{brightdata ? brightdata.enabled && brightdata.configured ? 'Activé' : brightdata.configured ? 'Inactif' : 'À configurer' : '—'}</span></div><div className="hx-service"><span className="hx-service-icon"><CaptureIcon name="folder"/></span><div><strong>Google Drive</strong><small>{source ? `${source.drive_uploaded} fichiers archivés` : 'Archivage par date et ligne'}</small></div><span className={`hx-state ${source && !source.drive_failed ? 'ok' : ''}`}>{source?.drive_failed ? 'À reprendre' : source ? source.drive_pending ? 'Envoi en cours' : 'À jour' : '—'}</span></div><p className="hx-service-note"><CaptureIcon name="check"/>L’historique reste conservé à chaque reprise.</p><button className="hx-text-button" onClick={() => onAller('chrome')}>Gérer la collecte< CaptureIcon name="arrow"/></button></article></div>
     <div className="hx-bottom-note"><span>FaithBook <i>×</i> HuntX</span><p>Une veille continue. Des preuves qui restent.</p></div>
   </section>
 }

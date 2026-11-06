@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api } from '../api'
+import { api, request } from '../api'
 import { dateHeure, duree, resumeErreur, STATUS_LABEL, useData } from '../lib'
 import type { RunStatus } from '../types'
 
@@ -8,6 +8,7 @@ interface Props {
 }
 
 const PAGE = 25
+type Reprises = Record<string, { run_id: number; capture_date: string }>
 
 export function Historique({ onOuvrirRun }: Props) {
   const [etat, setEtat] = useState<RunStatus | ''>('')
@@ -27,6 +28,12 @@ export function Historique({ onOuvrirRun }: Props) {
   )
 
   const { data: cibles } = useData(() => api.targets(), [])
+  const runIds = data?.items.map((r) => r.id).join(',') ?? ''
+  const { data: reprises, erreur: erreurReprises } = useData(
+    () => runIds ? request<Reprises>(`/huntx/recoveries?run_ids=${runIds}`) : Promise.resolve<Reprises>({}),
+    [runIds],
+    20000,
+  )
   const nom = (id: number) => cibles?.find((c) => c.id === id)?.name ?? `cible ${id}`
 
   const total = data?.total ?? 0
@@ -39,6 +46,7 @@ export function Historique({ onOuvrirRun }: Props) {
           <span className="eyebrow">Toutes les exécutions</span>
           <h1>Historique</h1>
           <p>Chaque tentative est conservée, y compris celles qui ont échoué ou été ignorées.</p>
+          <p>Une tentative marquée « récupérée » possède déjà une capture réussie de la même fiche dans la même campagne. Ouvrez sa reprise pour voir l’image.</p>
         </div>
       </div>
 
@@ -91,6 +99,7 @@ export function Historique({ onOuvrirRun }: Props) {
       </div>
 
       {erreur && <div className="notice error">{erreur}</div>}
+      {erreurReprises && <div className="notice error">Le suivi des reprises est indisponible : {erreurReprises}</div>}
       {chargement && <p className="mono">Chargement…</p>}
 
       {data && data.items.length === 0 && (
@@ -131,6 +140,7 @@ export function Historique({ onOuvrirRun }: Props) {
                     <td className="mono">{r.attempts}</td>
                     <td>
                       <span className={`tag ${r.status}`}>{STATUS_LABEL[r.status]}</span>
+                      {reprises?.[r.id] && <div style={{ marginTop: 4 }}><span className="tag success">récupérée</span></div>}
                       {r.changed && (
                         <div style={{ marginTop: 4 }}>
                           <span className="tag changed" title="La page a changé depuis la capture précédente">
@@ -146,6 +156,11 @@ export function Historique({ onOuvrirRun }: Props) {
                     </td>
                     <td style={{ maxWidth: 320, fontSize: 12.5, color: 'var(--ink-soft)' }}>
                       {r.error_message ? resumeErreur(r.error_message) : (r.skipped_reason ?? '')}
+                      {reprises?.[r.id] && <div style={{ marginTop: 6 }}>
+                        <button className="btn ghost sm" onClick={(event) => { event.stopPropagation(); onOuvrirRun(reprises[r.id].run_id) }}>
+                          Voir la capture réussie nº {reprises[r.id].run_id} du {reprises[r.id].capture_date}
+                        </button>
+                      </div>}
                     </td>
                   </tr>
                 ))}

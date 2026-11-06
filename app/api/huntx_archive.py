@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import current_organization, current_user
 from app.config import settings
 from app.database import get_session
-from app.models import OrganizationMembership, Run, Target
+from app.models import OrganizationMembership, Run, RunStatus, Target
 
 router = APIRouter(prefix="/api/huntx", tags=["Archives HuntX"], dependencies=[Depends(current_user)])
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
@@ -32,6 +33,54 @@ def scoped_query(model, organization_id):
     return select(model).join(Run, Run.id == model.source_run_id).join(Target, Target.id == Run.target_id).where(Target.organization_id == organization_id)
 
 
+def recovered_runs(session, organization_id, runs):
+    """Only a successful result of the SAME merchant job resolves an attempt.
+
+    A success from another campaign/date must not fill a historical gap.
+    """
+    from app import models
+    job_model = getattr(models, "BrowserLinkJob", None)
+    if job_model is None:
+        return {}
+    attempts = {}
+    for run in runs:
+        if run.status not in (RunStatus.failed, RunStatus.suspended, RunStatus.skipped):
+            continue
+        key = run.idempotency_key or ""
+        match = re.fullmatch(r"chrome:\d+:link-(\d+)(?:-a\d+|:history-\d+|:hist-\d{8}T\d{6}Z)?", key) or re.fullmatch(r"(?:zyte|brightdata|brightdata:invalid-zone:\d+:brightdata):job:(\d+)(?::.*)?", key)
+        if match:
+            attempts[run.id] = (run, int(match[1]))
+    if not attempts:
+        return {}
+    results = session.execute(select(job_model, Run).join(Target, Target.id == job_model.target_id)
+        .join(Run, Run.id == job_model.result_run_id)
+        .where(Target.organization_id == organization_id,
+               job_model.id.in_({job_id for _, job_id in attempts.values()}),
+               Run.target_id == job_model.target_id,
+               Run.status == RunStatus.success)).all()
+    successes = {job.id: result for job, result in results
+                 if job.finished_at and result.screenshot_path and Path(result.screenshot_path).is_file()}
+    recovered = {}
+    for run_id, (attempt, job_id) in attempts.items():
+        result = successes.get(job_id)
+        if result and result.id > attempt.id and result.target_id == attempt.target_id:
+            recovered[run_id] = dict(run_id=result.id, capture_date=result.capture_date,
+                                     captured_at=result.finished_at, final_url=result.final_url)
+    return recovered
+
+
+@router.get("/recoveries")
+def recoveries(run_ids: str = Query(max_length=4000), context=Depends(current_organization),
+               session: Session = Depends(get_session)):
+    parts = run_ids.split(',') if run_ids else []
+    if len(parts) > 500 or any(not part.isdecimal() or len(part) > 12 for part in parts):
+        raise HTTPException(422, "Identifiants d'exécution invalides.")
+    ids = [int(part) for part in parts]
+    runs = session.scalars(select(Run).join(Target).where(Target.organization_id == context.organization.id,
+                          Run.id.in_(ids))).all() if ids else []
+    return recovered_runs(session, context.organization.id, runs)
+
+
 @router.get("/workspaces")
 def workspaces(user=Depends(current_user), session: Session = Depends(get_session)):
     from app import models
@@ -43,6 +92,25 @@ def workspaces(user=Depends(current_user), session: Session = Depends(get_sessio
         .join(OrganizationMembership, OrganizationMembership.organization_id == Target.organization_id)
         .where(OrganizationMembership.user_id == user.id).group_by(Target.organization_id)).all()
     return [dict(organization_id=org_id, files=count) for org_id, count in rows]
+
+
+@router.get("/brightdata")
+def brightdata_status(context=Depends(current_organization)):
+    scoped = getattr(settings, "brightdata_organization_id", 0) == context.organization.id
+    configured = False
+    browser_configured = False
+    if scoped:
+        from app.services.brightdata_capture import api_key
+        from app.services.brightdata_browser import configured as browser_ready
+        configured = bool(api_key() and settings.brightdata_zone.strip())
+        browser_configured = browser_ready()
+    return dict(enabled=scoped and getattr(settings, "brightdata_enabled", False),
+                configured=configured or (browser_configured and settings.brightdata_browser_enabled),
+                browser_api=dict(enabled=scoped and settings.brightdata_browser_enabled,
+                                 configured=browser_configured,
+                                 daily_session_limit=settings.brightdata_browser_daily_limit if scoped else None),
+                daily_limit=settings.brightdata_daily_limit if scoped else None,
+                mode="fallback", reserved_requests_per_capture=2)
 
 
 @router.get("/zyte")

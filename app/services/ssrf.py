@@ -20,6 +20,14 @@ def _is_internal_ip(ip: str) -> bool:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return True  # illisible => on refuse par prudence
+    # Une IPv4 mappee en IPv6 (::ffff:x.x.x.x) tombe dans ::ffff:0:0/96,
+    # que ipaddress classe comme prive : toute adresse publique vue sous
+    # cette forme serait refusee. On la ramene a sa forme IPv4 pour la
+    # juger sur sa vraie nature. Les vraies adresses internes restent
+    # refusees, mappees ou non.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
     # Adresses privees, loopback, lien-local, et surtout la metadata cloud
     # 169.254.169.254 (couverte par is_link_local).
     return (
