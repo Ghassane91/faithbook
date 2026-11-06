@@ -17,6 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy import false as sa_false
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -125,6 +126,12 @@ class Organization(Base):
     )
     retention_days: Mapped[int] = mapped_column(
         Integer, default=90, server_default="90", nullable=False
+    )
+    # Interrupteur des alertes par e-mail de cet espace (échec, changement,
+    # session à reconnecter, rapport du matin). Désactivé, les mails ne partent
+    # plus ; les canaux complémentaires (Telegram, webhook) restent inchangés.
+    email_notifications: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sa_true(), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
