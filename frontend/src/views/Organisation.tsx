@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { dateHeure, useData } from '../lib'
 import type {
@@ -22,10 +22,12 @@ export function Organisation({
   organization,
   health,
   usage,
+  onOrganizationChange,
 }: {
   organization: Organization | null
   health: Health | null
   usage: OrganizationUsage | null
+  onOrganizationChange?: () => void
 }) {
   const {
     data: members,
@@ -46,11 +48,49 @@ export function Organisation({
   } | null>(null)
   const [inviteLink, setInviteLink] = useState<string | null>(null)
   const [occupe, setOccupe] = useState<number | 'new' | null>(null)
+  const [mailAlerts, setMailAlerts] = useState(
+    organization?.email_notifications ?? true,
+  )
+  const [mailBusy, setMailBusy] = useState(false)
+  const [mailMessage, setMailMessage] = useState<{
+    text: string
+    type: 'info' | 'error'
+  } | null>(null)
+  useEffect(() => {
+    setMailAlerts(organization?.email_notifications ?? true)
+    setMailMessage(null)
+  }, [organization?.id, organization?.email_notifications])
   const [driveBusy, setDriveBusy] = useState(false)
   const [driveMessage, setDriveMessage] = useState<{
     text: string
     type: 'info' | 'error'
   } | null>(null)
+
+  async function basculerAlertesMail() {
+    const suivant = !mailAlerts
+    setMailBusy(true)
+    setMailMessage(null)
+    try {
+      const updated = await api.updateOrganizationSettings({
+        email_notifications: suivant,
+      })
+      setMailAlerts(updated.email_notifications)
+      setMailMessage({
+        text: updated.email_notifications
+          ? 'Alertes par e-mail activées pour cet espace.'
+          : 'Alertes par e-mail désactivées pour cet espace.',
+        type: 'info',
+      })
+      onOrganizationChange?.()
+    } catch (error) {
+      setMailMessage({
+        text: error instanceof Error ? error.message : 'Modification impossible',
+        type: 'error',
+      })
+    } finally {
+      setMailBusy(false)
+    }
+  }
 
   async function testerDrive() {
     setDriveBusy(true)
@@ -160,6 +200,41 @@ export function Organisation({
       </div>
 
       {usage && <QuotaOverview usage={usage} />}
+
+      <h2 className="section-title">Alertes par e-mail</h2>
+      <div className="panel storage-panel">
+        <div>
+          <strong>
+            {mailAlerts ? 'Envoi des alertes activé' : 'Envoi des alertes désactivé'}{' '}
+            <span className={`tag ${mailAlerts ? 'success' : 'pending'}`}>
+              {mailAlerts ? 'Activé' : 'Désactivé'}
+            </span>
+          </strong>
+          <p className="form-hint">
+            Échecs de capture, changements détectés, sessions à reconnecter et
+            rapport du matin pour les cibles et comptes de cet espace. Les
+            invitations et la réinitialisation du mot de passe sont toujours
+            envoyées.
+          </p>
+        </div>
+        <button
+          className={mailAlerts ? 'btn ghost' : 'btn'}
+          onClick={basculerAlertesMail}
+          disabled={mailBusy || !organization}
+          aria-pressed={mailAlerts}
+        >
+          {mailBusy ? (
+            <span className="spinner" />
+          ) : mailAlerts ? (
+            'Désactiver'
+          ) : (
+            'Activer'
+          )}
+        </button>
+      </div>
+      {mailMessage && (
+        <div className={`notice ${mailMessage.type}`}>{mailMessage.text}</div>
+      )}
 
       <form className="member-form" onSubmit={ajouter}>
         <input

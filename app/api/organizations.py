@@ -24,6 +24,7 @@ from app.schemas import (
     OrganizationMemberOut,
     OrganizationMemberUpdate,
     OrganizationOut,
+    OrganizationSettingsUpdate,
     OrganizationUsageOut,
     QuotaMetricOut,
 )
@@ -49,6 +50,7 @@ def _out(organization: Organization, membership: OrganizationMembership) -> Orga
         quota_daily_captures=organization.quota_daily_captures,
         quota_storage_bytes=organization.quota_storage_bytes,
         retention_days=organization.retention_days,
+        email_notifications=organization.email_notifications,
     )
 
 
@@ -100,6 +102,35 @@ def create_organization(
 @router.get("/current", response_model=OrganizationOut)
 def current(context: tenancy.OrganizationContext = Depends(current_organization)):
     return _out(context.organization, context.membership)
+
+
+@router.patch(
+    "/current/settings",
+    response_model=OrganizationOut,
+    summary="Réglages de l'organisation active (alertes par e-mail)",
+)
+def update_settings(
+    payload: OrganizationSettingsUpdate,
+    request: Request,
+    context: tenancy.OrganizationContext = Depends(organization_admin),
+    session: Session = Depends(get_session),
+):
+    organization = session.get(Organization, context.organization.id)
+    if organization.email_notifications != payload.email_notifications:
+        organization.email_notifications = payload.email_notifications
+        session.commit()
+        session.refresh(organization)
+        audit.record(
+            session,
+            "organization.settings_update",
+            user=context.user,
+            detail=(
+                f"organisation #{organization.id} alertes e-mail="
+                f"{'activées' if payload.email_notifications else 'désactivées'}"
+            ),
+            ip=client_ip(request),
+        )
+    return _out(organization, context.membership)
 
 
 @router.get(

@@ -199,6 +199,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
+  updateOrganizationSettings: (settings: { email_notifications: boolean }) =>
+    request<Organization>('/organizations/current/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(settings),
+    }),
   organizationMembers: () =>
     request<OrganizationMember[]>('/organizations/current/members'),
   addOrganizationMember: (email: string, role: string) =>

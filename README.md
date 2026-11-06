@@ -357,6 +357,12 @@ contenu est journalisé) :
 Destinataire : `NOTIFY_EMAIL`, à défaut l'adresse du premier utilisateur.
 Un horaire vide désactive la tâche.
 
+**Interrupteur par espace.** Dans *Équipe › Alertes par e-mail*, un
+propriétaire ou un administrateur peut couper les mails d'alerte de l'espace
+actif (échecs, changements, sessions, rapport du matin) sans toucher au `.env`.
+Les canaux Telegram/webhook continuent de recevoir les alertes ; les
+invitations et la réinitialisation du mot de passe partent toujours.
+
 ### Nettoyage automatique
 
 Chaque nuit (3 h 30), les exécutions **et les fichiers locaux** plus vieux que

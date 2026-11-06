@@ -296,6 +296,7 @@ function AppConnecte() {
               organization={organisationActive ?? null}
               health={sante ?? null}
               usage={usage ?? null}
+              onOrganizationChange={rechargerOrganisations}
             />
           ) : route === 'mentions' ? (
             <MentionsLegales />

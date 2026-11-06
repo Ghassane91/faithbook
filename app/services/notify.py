@@ -8,7 +8,16 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import session_scope
-from app.models import Account, AccountStatus, Run, RunStatus, Target, User, utcnow
+from app.models import (
+    Account,
+    AccountStatus,
+    Organization,
+    Run,
+    RunStatus,
+    Target,
+    User,
+    utcnow,
+)
 from app.services import channels, mailer, session_check, session_state
 from app.services.login_browser import login_manager
 
@@ -42,13 +51,8 @@ def _recipient() -> str | None:
         return user.email if user else None
 
 
-def _send(subject: str, body: str) -> None:
-    """Envoi best-effort sur tous les canaux.
-
-    Une alerte ne doit jamais casser une capture, et un canal en panne
-    ne doit pas empecher les autres de partir : le mail et les canaux
-    complementaires sont donc traites separement.
-    """
+def _mail(subject: str, body: str) -> None:
+    """Envoi best-effort du mail seul (sans les canaux complementaires)."""
     try:
         to = _recipient()
         if to:
@@ -57,7 +61,55 @@ def _send(subject: str, body: str) -> None:
             logger.warning("Aucun destinataire de notification configure.")
     except Exception:  # noqa: BLE001
         logger.error("Envoi du mail de notification impossible", exc_info=True)
+
+
+def _send(subject: str, body: str) -> None:
+    """Envoi best-effort sur tous les canaux.
+
+    Une alerte ne doit jamais casser une capture, et un canal en panne
+    ne doit pas empecher les autres de partir : le mail et les canaux
+    complementaires sont donc traites separement.
+    """
+    _mail(subject, body)
     channels.broadcast(subject, body)
+
+
+# --- Interrupteur « alertes par e-mail » de chaque organisation ------------
+def _orgs_mail_off() -> set[int]:
+    """Organisations dont les alertes par e-mail sont desactivees.
+
+    En cas d'erreur de lecture, on considere que tout est active : mieux vaut
+    un mail de trop qu'une alerte perdue.
+    """
+    try:
+        with session_scope() as s:
+            return set(
+                s.scalars(
+                    select(Organization.id).where(
+                        Organization.email_notifications.is_(False)
+                    )
+                ).all()
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("Lecture des reglages d'alerte impossible", exc_info=True)
+        return set()
+
+
+def _send_for(target: Target, subject: str, body: str) -> None:
+    """Alerte liee a une cible : respecte l'interrupteur de son organisation.
+
+    Mail coupe => seuls les canaux complementaires (Telegram, webhook) partent.
+    """
+    organization_id = getattr(target, "organization_id", None)
+    if organization_id is not None and organization_id in _orgs_mail_off():
+        logger.info(
+            "Alerte e-mail desactivee pour l'organisation #%s : %s",
+            organization_id,
+            subject,
+        )
+        channels.broadcast(subject, body)
+        return
+    _send(subject, body)
 
 
 # --- 1. Alerte immediate sur echec de capture ------------------------------
@@ -74,7 +126,7 @@ def notify_failure(target: Target, run: Run) -> None:
         f"Détail et journal complet : {lien}\n\n"
         f"— FaithBook"
     )
-    _send(f"FaithBook — échec de capture : {target.name}", body)
+    _send_for(target, f"FaithBook — échec de capture : {target.name}", body)
 
 
 # --- 1bis. Alerte quand une page suivie a changé ---------------------------
@@ -92,7 +144,7 @@ def notify_change(target: Target, run: Run, prev: Run) -> None:
         f"Comparez les captures (avant / après) dans l'historique :\n{lien}\n\n"
         f"— FaithBook"
     )
-    _send(f"FaithBook — « {target.name} » a changé ({pct} %)", body)
+    _send_for(target, f"FaithBook — « {target.name} » a changé ({pct} %)", body)
 
 
 def notify_extraction(target: Target, run: Run, evenements: list) -> None:
@@ -113,7 +165,7 @@ def notify_extraction(target: Target, run: Run, evenements: list) -> None:
         + f"\n\nCapture et historique :\n{lien}\n\n— FaithBook"
     )
     n = len(evenements)
-    _send(f"FaithBook — {target.name} : {n} changement(s) détecté(s)", body)
+    _send_for(target, f"FaithBook — {target.name} : {n} changement(s) détecté(s)", body)
 
 
 def notify_session_suspended(target: Target, run: Run, account: Account | None) -> None:
@@ -129,7 +181,7 @@ def notify_session_suspended(target: Target, run: Run, account: Account | None) 
         f"Détail : {(run.error_message or 'reconnexion requise')[:500]}\n\n"
         f"Reconnectez le compte ici : {lien}\n\n— FaithBook"
     )
-    _send(f"FaithBook — capture suspendue : {target.name}", body)
+    _send_for(target, f"FaithBook — capture suspendue : {target.name}", body)
 
 
 # --- 2. Verification quotidienne des sessions ------------------------------
@@ -138,19 +190,20 @@ async def check_all_sessions() -> None:
 
     Un seul mail récapitulatif, uniquement s'il y a un problème.
     """
-    problemes: list[str] = []
-    expirations: list[str] = []
+    # (organisation du compte, ligne du mail)
+    problemes: list[tuple[int | None, str]] = []
+    expirations: list[tuple[int | None, str]] = []
     with session_scope() as s:
         accounts = s.scalars(select(Account)).all()
         # Les comptes a connexion automatique (HuntX...) se reconnectent seuls
         # a la capture : le test quotidien, propre a Facebook, ne les concerne pas.
         infos = [
-            (a.id, a.name, a.profile_slug, a.platform, a.encrypted_state)
+            (a.id, a.name, a.profile_slug, a.platform, a.encrypted_state, a.organization_id)
             for a in accounts
             if not a.encrypted_credentials
         ]
 
-    for account_id, name, slug, platform, encrypted_state in infos:
+    for account_id, name, slug, platform, encrypted_state, org_id in infos:
         if login_manager.active_account_id == account_id:
             continue  # connexion manuelle en cours : ne pas interférer
         try:
@@ -177,7 +230,9 @@ async def check_all_sessions() -> None:
             AccountStatus.verification_required,
             AccountStatus.error,
         ):
-            problemes.append(f"- {name} : {ACCOUNT_FR[result['status']]} — {result['detail']}")
+            problemes.append(
+                (org_id, f"- {name} : {ACCOUNT_FR[result['status']]} — {result['detail']}")
+            )
         if result["status"] == AccountStatus.connected:
             _, expires_at = session_state.session_expiry(current_state)
             if expires_at is not None:
@@ -187,65 +242,127 @@ async def check_all_sessions() -> None:
                 ):
                     days = max(0, remaining.days)
                     expirations.append(
-                        f"- {name} : expiration estimée le {expires_at:%d/%m/%Y} "
-                        f"({days} jour(s))"
+                        (
+                            org_id,
+                            f"- {name} : expiration estimée le {expires_at:%d/%m/%Y} "
+                            f"({days} jour(s))",
+                        )
                     )
         logger.info("Session '%s' testee : %s", name, result["status"].value)
 
-    if problemes or expirations:
-        lien = f"{settings.public_url.rstrip('/')}/#/comptes"
-        sections: list[str] = []
-        if problemes:
-            sections.append(
-                "Sessions nécessitant une intervention :\n\n" + "\n".join(problemes)
-            )
-        if expirations:
-            sections.append(
-                "Sessions proches de leur expiration estimée :\n\n"
-                + "\n".join(expirations)
-            )
-        body = "\n\n".join(sections) + f"\n\nGérer les comptes : {lien}\n\n— FaithBook"
-        sujet = (
-            "FaithBook — session(s) à reconnecter"
-            if problemes
-            else "FaithBook — session(s) bientôt expirée(s)"
-        )
+    if not (problemes or expirations):
+        return
+    sujet, body = _message_sessions(
+        [ligne for _, ligne in problemes], [ligne for _, ligne in expirations]
+    )
+    off = _orgs_mail_off()
+    p_mail = [ligne for org, ligne in problemes if org not in off]
+    e_mail = [ligne for org, ligne in expirations if org not in off]
+    if len(p_mail) == len(problemes) and len(e_mail) == len(expirations):
         _send(sujet, body)
+        return
+    # Certaines organisations ont coupe leurs mails : les canaux recoivent
+    # tout, le mail ne garde que les comptes des organisations actives.
+    channels.broadcast(sujet, body)
+    if p_mail or e_mail:
+        _mail(*_message_sessions(p_mail, e_mail))
+
+
+def _message_sessions(problemes: list[str], expirations: list[str]) -> tuple[str, str]:
+    lien = f"{settings.public_url.rstrip('/')}/#/comptes"
+    sections: list[str] = []
+    if problemes:
+        sections.append(
+            "Sessions nécessitant une intervention :\n\n" + "\n".join(problemes)
+        )
+    if expirations:
+        sections.append(
+            "Sessions proches de leur expiration estimée :\n\n"
+            + "\n".join(expirations)
+        )
+    body = "\n\n".join(sections) + f"\n\nGérer les comptes : {lien}\n\n— FaithBook"
+    sujet = (
+        "FaithBook — session(s) à reconnecter"
+        if problemes
+        else "FaithBook — session(s) bientôt expirée(s)"
+    )
+    return sujet, body
 
 
 # --- 3. Rapport quotidien ---------------------------------------------------
 def daily_report() -> None:
-    """Un seul mail le matin : les captures d'hier + l'état des sessions."""
+    """Un seul mail le matin : les captures d'hier + l'état des sessions.
+
+    Le mail ne couvre que les organisations dont les alertes par e-mail sont
+    actives ; les canaux complémentaires reçoivent le rapport complet.
+    """
     tz = ZoneInfo(settings.timezone)
     hier = (datetime.now(tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+    sujet = f"FaithBook — rapport du {hier}"
+    off = _orgs_mail_off()
 
     with session_scope() as s:
         runs = s.scalars(select(Run).where(Run.capture_date == hier)).all()
         targets = {t.id: t for t in s.scalars(select(Target)).all()}
         accounts = s.scalars(select(Account)).all()
+        complet = _texte_rapport(hier, runs, targets, accounts)
+        if not off:
+            texte_mail: str | None = complet
+        else:
+            def garde(org_id: int | None) -> bool:
+                return org_id not in off
 
-        total = len(runs)
-        ok = sum(1 for r in runs if r.status == RunStatus.success)
-        skipped = sum(1 for r in runs if r.status == RunStatus.skipped)
-        failed = [r for r in runs if r.status == RunStatus.failed]
+            t_mail = {i: t for i, t in targets.items() if garde(t.organization_id)}
+            r_mail = [
+                r
+                for r in runs
+                if r.target_id not in targets or r.target_id in t_mail
+            ]
+            a_mail = [a for a in accounts if garde(a.organization_id)]
+            orgs_actives = s.scalars(
+                select(Organization.id).where(Organization.email_notifications.is_(True))
+            ).first()
+            sans_org = any(t.organization_id is None for t in t_mail.values()) or any(
+                a.organization_id is None for a in a_mail
+            )
+            texte_mail = (
+                _texte_rapport(hier, r_mail, t_mail, a_mail)
+                if orgs_actives is not None or sans_org
+                else None
+            )
 
-        lignes = [f"Captures du {hier} : {ok} réussie(s), {skipped} ignorée(s), "
-                  f"{len(failed)} échec(s) sur {total} exécution(s)."]
+    if texte_mail == complet:
+        _send(sujet, complet)
+        return
+    channels.broadcast(sujet, complet)
+    if texte_mail is not None:
+        _mail(sujet, texte_mail)
+    else:
+        logger.info("Rapport quotidien : alertes e-mail desactivees partout, mail non envoye.")
 
-        if failed:
-            lignes.append("\nÉchecs :")
-            for r in failed:
-                t = targets.get(r.target_id)
-                nom = t.name if t else f"cible #{r.target_id}"
-                lignes.append(f"- {nom} : {(r.error_message or 'erreur inconnue')[:160]}")
 
-        if accounts:
-            lignes.append("\nComptes connectés :")
-            for a in accounts:
-                lignes.append(f"- {a.name} : {ACCOUNT_FR.get(a.status, a.status.value)}")
+def _texte_rapport(hier: str, runs: list, targets: dict, accounts: list) -> str:
+    total = len(runs)
+    ok = sum(1 for r in runs if r.status == RunStatus.success)
+    skipped = sum(1 for r in runs if r.status == RunStatus.skipped)
+    failed = [r for r in runs if r.status == RunStatus.failed]
 
-        actives = sum(1 for t in targets.values() if t.enabled)
-        lignes.append(f"\nCibles actives : {actives}")
-        lignes.append(f"\nTableau de bord : {settings.public_url.rstrip('/')}\n\n— FaithBook")
+    lignes = [f"Captures du {hier} : {ok} réussie(s), {skipped} ignorée(s), "
+              f"{len(failed)} échec(s) sur {total} exécution(s)."]
 
-    _send(f"FaithBook — rapport du {hier}", "\n".join(lignes))
+    if failed:
+        lignes.append("\nÉchecs :")
+        for r in failed:
+            t = targets.get(r.target_id)
+            nom = t.name if t else f"cible #{r.target_id}"
+            lignes.append(f"- {nom} : {(r.error_message or 'erreur inconnue')[:160]}")
+
+    if accounts:
+        lignes.append("\nComptes connectés :")
+        for a in accounts:
+            lignes.append(f"- {a.name} : {ACCOUNT_FR.get(a.status, a.status.value)}")
+
+    actives = sum(1 for t in targets.values() if t.enabled)
+    lignes.append(f"\nCibles actives : {actives}")
+    lignes.append(f"\nTableau de bord : {settings.public_url.rstrip('/')}\n\n— FaithBook")
+    return "\n".join(lignes)

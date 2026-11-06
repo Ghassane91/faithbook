@@ -78,6 +78,11 @@ class OrganizationOut(BaseModel):
     quota_daily_captures: int
     quota_storage_bytes: int
     retention_days: int
+    email_notifications: bool = True
+
+
+class OrganizationSettingsUpdate(BaseModel):
+    email_notifications: bool
 
 
 class QuotaMetricOut(BaseModel):

@@ -149,6 +149,7 @@ export interface Organization {
   quota_daily_captures: number
   quota_storage_bytes: number
   retention_days: number
+  email_notifications: boolean
 }
 
 export interface QuotaMetric {
