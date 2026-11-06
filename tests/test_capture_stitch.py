@@ -80,5 +80,10 @@ async def test_capture_assemble_chaque_fenetre_sans_trou(tmp_path):
     assert page.y == 0
     with Image.open(destination) as image:
         assert image.size == (600, 1000)
-        assert image.getpixel((10, 50)) == (0, 80, 120)
+        # Les captures sont enregistrees en JPEG (qualite 75) : la compression
+        # decale legerement les couleurs. On tolere un ecart de 3 sur 255 par
+        # canal, invisible a l oeil, au lieu d exiger le pixel exact.
+        attendu = (0, 80, 120)
+        obtenu = image.convert("RGB").getpixel((10, 50))
+        assert all(abs(o - a) <= 3 for o, a in zip(obtenu, attendu)), obtenu
         assert image.getpixel((10, 500))[0] > 0

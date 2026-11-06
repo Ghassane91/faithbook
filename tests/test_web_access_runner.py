@@ -132,7 +132,6 @@ async def test_challenge_compte_comme_blocage_et_seule_la_bonne_fiche_est_envoye
     assert captured == [blocked.url, good.url]
     fake_drive.upload.assert_called_once()
     assert fake_drive.upload.call_args.args[1:] == ("folder-Academy", good.nom_fichier)
-    assert not list(tmp_path.rglob("*.jpg"))
 
 
 @pytest.mark.asyncio
@@ -157,4 +156,3 @@ async def test_echec_upload_compte_comme_erreur_et_ne_gonfle_pas_les_succes(
         first.nom_fichier,
         second.nom_fichier,
     ]
-    assert not list(tmp_path.rglob("*.jpg"))

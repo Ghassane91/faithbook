@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -88,7 +89,7 @@ def _reactiver_les_alertes():
 def _org(enabled: bool) -> int:
     with session_scope() as session:
         org = Organization(
-            name=f"Org {enabled}", slug=f"org-alertes-{enabled}-{id(object())}",
+            name=f"Org {enabled}", slug=f"org-alertes-{enabled}-{uuid.uuid4().hex[:12]}",
             email_notifications=enabled,
         )
         session.add(org)

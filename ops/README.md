@@ -1,5 +1,7 @@
 # FaithBook — Outils d'exploitation
 
+Depuis le 12 octobre 2026, le frontend actif est celui de `frontend/`, commun à `/application/`, `/nouvelle-interface/` et à l’entrée DuckDNS. Utiliser `deployer-frontend-unique.sh PATCH SHA_GITHUB` pour publier ce frontend avec sauvegarde et vérification. Voir `../docs/frontend-unique.md`. Les anciens scripts de publication statique ci-dessous sont conservés pour l’historique ; ils ne mettent plus à jour l’interface active.
+
 Scripts de déploiement, de retour arrière, de vérification et d'inventaire pour la
 nouvelle interface FaithBook servie sur `/nouvelle-interface/`.
 

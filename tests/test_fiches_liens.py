@@ -131,7 +131,7 @@ def test_envoi_des_lignes_puis_nettoyage(tmp_path):
     with mock.patch("app.services.drive.drive_client", faux), \
          mock.patch.object(fiches_liens, "_journaliser"):
         n = fiches_liens.envoyer_lignes([{"fichier": str(fichier), "nom": "A - B.jpg"}], "2026-09-30", 1)
-    assert n == 1 and not fichier.exists()
+    assert n == 1 and fichier.exists()  # Depuis la version serveur, les fichiers restent sur disque (reprise Drive, purge nocturne).
     faux.upload.assert_called_once_with(fichier, "jour", "A - B.jpg")
     assert faux.ensure_folder.call_args_list[0].args[0] == fiches_liens.DOSSIER_LIGNES
 
@@ -161,7 +161,6 @@ async def test_page_anti_robot_jamais_envoyee_sur_drive(tmp_path):
     assert bilan == {"total": 2, "ok": 1, "bloquees": 1, "erreurs": 0}
     faux.upload.assert_called_once()
     assert faux.upload.call_args.args[1:] == ("id-Amazon", "Spypoint - Flex.jpg")
-    assert not any(tmp_path.rglob("*.jpg"))
 
 
 def test_tableau_des_prix_csv():
@@ -200,7 +199,7 @@ def test_envoi_du_tableau_des_prix(tmp_path):
     assert faux.ensure_folder.call_args.args[0] == fiches_liens.DOSSIER_PRIX
     chemin, dossier, nom = faux.upload.call_args.args
     assert dossier == "dossier-prix" and nom == "HuntX prix par marketplace - 2026-10-01.csv"
-    assert not chemin.exists()
+    assert chemin.exists()  # Depuis la version serveur, les fichiers restent sur disque (reprise Drive, purge nocturne).
 
 
 @pytest.mark.asyncio

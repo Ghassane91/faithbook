@@ -43,6 +43,7 @@ class CaptureResult:
     row_links: list | None = None
     # Images par ligne du tableau (option capture_row_links) : [{"fichier", "nom"}].
     row_images: list | None = None
+    # Prix affiches par le tableau, par produit et par marchand (option capture_row_links).
     row_prices: list | None = None
 
 
