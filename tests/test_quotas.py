@@ -237,3 +237,30 @@ def test_retention_est_isolee_par_organisation(
     assert not thumb_path(short_png).exists()
     assert long_png.exists()
     assert thumb_path(long_png).exists()
+
+
+def test_retention_preserves_pending_huntx_drive(auth_client, public_example_dns):
+    from app.models import HuntxDriveArtifact
+    organization = _organization(auth_client, 'HuntX pending retention')
+    target = _target(auth_client, organization['id'], 'HuntX retention')
+    _set_quotas(organization['id'], retention_days=1)
+    old = utcnow() - timedelta(days=10)
+    path = Path(settings.screenshot_dir) / f'pending-huntx-{uuid4().hex}.jpg'
+    path.write_bytes(b'image kept until upload')
+    with session_scope() as session:
+        run = Run(target_id=target['id'], trigger=TriggerType.manual, capture_date=old.date().isoformat(),
+                  status=RunStatus.success, started_at=old, screenshot_path=str(path))
+        session.add(run); session.flush()
+        run_id = run.id
+        item = HuntxDriveArtifact(source_run_id=run.id, dedupe_key=f'retention-{run.id}', capture_date=run.capture_date,
+            kind='row', local_path=str(path), filename=path.name, drive_status='failed')
+        session.add(item); session.flush()
+        artifact_id = item.id
+    with session_scope() as session:
+        quotas.purge_expired_runs(session)
+        assert session.get(Run, run_id) and path.is_file()
+        session.get(HuntxDriveArtifact, artifact_id).drive_status = 'uploaded'
+    with session_scope() as session:
+        quotas.purge_expired_runs(session)
+        assert session.get(Run, run_id) is None
+    assert not path.exists()

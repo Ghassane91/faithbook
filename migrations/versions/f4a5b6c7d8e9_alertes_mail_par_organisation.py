@@ -1,7 +1,7 @@
 """Organisations : interrupteur des alertes par e-mail
 
 Revision ID: f4a5b6c7d8e9
-Revises: e3f4a5b6c7d8
+Revises: c8d9e0f1a2b3
 
 """
 
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "f4a5b6c7d8e9"
-down_revision = "e3f4a5b6c7d8"
+down_revision = "c8d9e0f1a2b3"
 branch_labels = None
 depends_on = None
 

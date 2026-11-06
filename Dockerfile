@@ -34,6 +34,7 @@ COPY alembic.ini .
 COPY pytest.ini .
 COPY migrations ./migrations
 COPY app ./app
+COPY chrome-extension ./chrome-extension
 COPY tests ./tests
 COPY scripts ./scripts
 # Artefacts lus par les tests d'exploitation Phase 1c. Ils sont copiés dans

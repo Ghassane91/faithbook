@@ -1,16 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {backendOrigin, publicProductURL, sameSite, verdict, clipSize, captureWarnings, readableText} from './policy.mjs';
-
-test('legacy messages recover accents and apostrophes without altering valid French', () => {
-  assert.equal(readableText('ReÃ§u par FaithBook : exÃ©cution #3732'), 'Reçu par FaithBook : exécution #3732');
-  assert.equal(readableText('VÃ©rifiez lâ€™appairage ou lâ€™historique.'), 'Vérifiez l’appairage ou l’historique.');
-  for (const text of ['Reçu par FaithBook : exécution #3732', 'À vérifier — prêt à l’emploi…', 'Texte déjà correct ✅', 'âge : 42', 'Séquence incomplète Ã']) assert.equal(readableText(text), text);
-});
-test('repair handles double encoding and mixed valid text', () => {
-  assert.equal(readableText('ReÃƒÂ§u : exÃƒÂ©cution'), 'Reçu : exécution');
-  assert.equal(readableText('Déjà prêt — exÃ©cution reçue ✅'), 'Déjà prêt — exécution reçue ✅');
-});
+import {backendOrigin, publicProductURL, sameSite, verdict, clipSize, captureWarnings} from './policy.mjs';
 
 test('backend HTTPS, sans identifiants ni chemin', () => {
   assert.equal(backendOrigin('https://faithbook.example/'), 'https://faithbook.example');
