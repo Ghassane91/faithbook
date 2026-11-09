@@ -27,6 +27,9 @@ os.environ["LOG_FILE"] = os.path.join(_TEST_DIR, "app.log")
 # celui qui doit etre teste : ne pas laisser un .env local le changer.
 os.environ["ALLOWED_DOMAINS"] = ""
 os.environ["ALLOW_PRIVATE_TARGETS"] = "false"
+os.environ["REMOTE_BROWSER_PROVIDER"] = "disabled"
+os.environ["REMOTE_BROWSER_CDP_URL"] = ""
+os.environ["REMOTE_BROWSER_DOMAINS"] = "walmart.com,academy.com,basspro.com,cabelas.com"
 # Les tests de fournisseurs IA simulent tous les appels. Une configuration
 # reelle dans le .env de la machine ne doit jamais declencher de reseau ni
 # changer le resultat de la suite.
