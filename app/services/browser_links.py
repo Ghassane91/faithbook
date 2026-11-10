@@ -5,7 +5,7 @@ import socket
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import select
-from app.models import BrowserDevice, BrowserTarget, BrowserLinkJob, Target, Run, RunLog
+from app.models import BrowserDevice, BrowserTarget, BrowserLinkJob, Target, Run, RunLog, utcnow
 from app.services import quotas
 
 
@@ -83,6 +83,19 @@ def enqueue_links(session, source_run_id: int, links: list[dict]):
         keyed = {json.dumps(ref, sort_keys=True, ensure_ascii=False): ref for ref in existing + references}
         job.row_references = json.dumps(list(keyed.values()), ensure_ascii=False)
         accepted.append(job.id)
+    # Une nouvelle campagne remplace les fiches encore en attente des campagnes
+    # précédentes : sinon elles s'empilent et chaque lien est capturé plusieurs fois.
+    replaced = 0
+    if accepted:
+        for old in session.scalars(select(BrowserLinkJob).join(
+                BrowserTarget, BrowserTarget.target_id == BrowserLinkJob.target_id).where(
+                BrowserTarget.source_target_id == source.id, BrowserLinkJob.source_run_id != run.id,
+                BrowserLinkJob.finished_at.is_(None))):
+            old.finished_at, old.next_attempt_at = utcnow(), None
+            replaced += 1
+    if replaced:
+        session.add(RunLog(run_id=run.id, step='fiches', level='INFO',
+            message=f'{replaced} fiche(s) en attente des campagnes précédentes remplacée(s) par cette campagne.'))
     session.add(RunLog(run_id=run.id, step='fiches', level='INFO',
         message=f'Chrome personnel : {len(set(accepted))} fiche(s) en file, {len(rejected)} lien(s) non admissible(s). PC et Chrome doivent rester ouverts.'))
     for reason in rejected:

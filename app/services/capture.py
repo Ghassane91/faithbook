@@ -119,6 +119,11 @@ def image_change_ratio(before: Path, after: Path) -> float | None:
         from PIL import Image, ImageChops
 
         with Image.open(before) as ba, Image.open(after) as aa:
+            # Sur un JPEG, le decodeur livre directement une version reduite
+            # en niveaux de gris (draft) : ~17 Mo au lieu de ~280 Mo pour une
+            # page de 1440 x 48 000 px. Sans effet sur un PNG.
+            for im in (ba, aa):
+                im.draft("L", (_DIFF_WIDTH, max(1, round(im.height * _DIFF_WIDTH / im.width))))
             a = ba.convert("L")
             b = aa.convert("L")
 
@@ -256,11 +261,17 @@ def make_thumbnail(screenshot: Path) -> Path | None:
 
         destination = thumb_path(screenshot)
         with Image.open(screenshot) as img:
-            img = img.convert("RGB")
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
             # Ne jamais rogner le bas : la Planche propose un aperçu vertical
             # déroulant. La borne de hauteur garde un fichier léger même pour
             # les fils réellement très longs.
+            # Appelé sur un JPEG pas encore décodé, thumbnail() demande au
+            # décodeur une image déjà réduite : quelques dizaines de Mo au lieu
+            # de ~560 Mo (décodage + copie RGB) pour une page de 48 000 px.
             img.thumbnail((THUMB_WIDTH, THUMB_MAX_HEIGHT), Image.LANCZOS)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             img.save(destination, "JPEG", quality=74, optimize=True, progressive=True)
         # Supprime l'ancienne vignette 4:3 dès qu'elle a été remplacée.
         legacy_thumb_path(screenshot).unlink(missing_ok=True)

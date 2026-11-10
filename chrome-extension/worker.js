@@ -1,6 +1,7 @@
-import {URLS, publicProductURL, backendOrigin, sameSite, verdict, clipSize, captureWarnings} from './policy.mjs';
+import {URLS, publicProductURL, backendOrigin, sameSite, verdict, clipSize, captureWarnings, failureReason} from './policy.mjs';
 
 const ALARM = 'faithbook-check';
+const AGE_GATE = "Fenêtre de vérification d'âge non validée : ouvrir le site une fois dans ce Chrome et y répondre soi-même.";
 let busy = false;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -64,7 +65,13 @@ async function waitForAssets(tabId, maxMs, height = null) {
 async function pageInfo(tabId) {
   const value = await inPage(tabId, () => ({
     title: document.title.slice(0, 500), text: (document.body?.innerText || '').slice(0, 100000),
-    final_url: location.href, ready: document.readyState
+    final_url: location.href, ready: document.readyState,
+    // Fenêtre de vérification d'âge visible (ex. Bass Pro). Détection seulement : aucun clic.
+    age_gate: [...document.querySelectorAll('[role="dialog"],[aria-modal="true"],dialog,[class*="modal" i],[id*="modal" i]')].some(el => {
+      const box = el.getBoundingClientRect(), css = getComputedStyle(el);
+      return box.width > 200 && box.height > 100 && css.display !== 'none' && css.visibility !== 'hidden' && Number(css.opacity) > 0
+        && /\b(?:18|21)\b.{0,40}(?:years|older|ans)|age verification|verify (?:your )?age|legal age|âge légal/i.test((el.innerText || '').slice(0, 2000));
+    })
   }));
   if (!value) throw new Error('Page illisible.');
   return value;
@@ -119,7 +126,8 @@ async function capture(job) {
     page = await pageInfo(tab.id);
     if (!sameSite(job.url, page.final_url)) return await failureResult('navigation', 'Redirection hors du site prévu.', page);
     let status = verdict(page);
-    if (status !== 'success') return await failureResult(status, status === 'navigation' ? 'Page introuvable ou lien obsolète.' : '', page);
+    if (status !== 'success') return await failureResult(status, failureReason(status, page), page);
+    if (page.age_gate) return await failureResult('capture', AGE_GATE, page);
     // Chargement différé borné ; jamais de clic sur les vérifications humaines.
     for (let step = 0; step < 30; step++) {
       const bottom = await inPage(tab.id, () => {
@@ -135,7 +143,8 @@ async function capture(job) {
     page = await pageInfo(tab.id);
     status = verdict(page);
     if (!sameSite(job.url, page.final_url)) return await failureResult('navigation', 'Redirection hors du site prévu.', page);
-    if (status !== 'success') return await failureResult(status, status === 'navigation' ? 'Page introuvable ou lien obsolète.' : '', page);
+    if (status !== 'success') return await failureResult(status, failureReason(status, page), page);
+    if (page.age_gate) return await failureResult('capture', AGE_GATE, page);
     const metrics = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics');
     const size = metrics.cssContentSize;
     let {truncated, ...clip} = clipSize(size.width, size.height);
@@ -148,7 +157,9 @@ async function capture(job) {
       ({truncated, ...clip} = settledClip);
       assets = await waitForAssets(tab.id, 1000, clip.height);
     }
-    if (assets?.total > 0 && assets.loaded === 0) {
+    // Une photo produit qui ne charge pas n'empêche plus la capture quand la page
+    // a son contenu : l'avertissement est conservé avec la capture.
+    if (assets?.total > 0 && assets.loaded === 0 && page.text.trim().length < 1500) {
       return await failureResult('capture', 'Aucune image principale chargée. ' + captureWarnings({truncated, height: clip.height}, assets), page);
     }
     const shot = await chrome.debugger.sendCommand(target, 'Page.captureScreenshot', {
@@ -158,7 +169,8 @@ async function capture(job) {
     const after = await pageInfo(tab.id);
     if (!sameSite(job.url, after.final_url)) return await failureResult('navigation', 'Redirection hors du site prévu.', after);
     status = verdict(after);
-    if (status !== 'success') return await failureResult(status, status === 'navigation' ? 'Page introuvable ou lien obsolète.' : '', after);
+    if (status !== 'success') return await failureResult(status, failureReason(status, after), after);
+    if (after.age_gate) return await failureResult('capture', AGE_GATE, after);
     if (shot.data.length > 8000000) return await failureResult('capture', 'Image trop lourde (> 8 Mo).', after);
     return {...after, status: 'success', image: shot.data, captured_at: capturedAt,
       reason: captureWarnings({truncated, height: clip.height}, assets)};

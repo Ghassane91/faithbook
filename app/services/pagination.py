@@ -59,16 +59,16 @@ def pdf_par_ecran(
         if hauteur <= hauteur_page:
             return None
         cadre = image.convert("RGB") if image.mode != "RGB" else image
-        pages = [
-            cadre.crop((0, haut, largeur, bas))
-            for haut, bas in _limites(hauteur, hauteur_page, recouvrement)
-        ]
+        limites = _limites(hauteur, hauteur_page, recouvrement)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        pages[0].save(
-            destination,
-            "PDF",
-            save_all=True,
-            append_images=pages[1:],
-            resolution=96.0,
-        )
-    return len(pages)
+        destination.unlink(missing_ok=True)
+        # Une page a la fois, ajoutee au fichier (append) : garder toutes les
+        # pages decoupees en memoire doublait le poids de l'image source
+        # (~300 Mo de plus pour une page de 48 000 px).
+        for numero, (haut, bas) in enumerate(limites):
+            page = cadre.crop((0, haut, largeur, bas))
+            try:
+                page.save(destination, "PDF", append=numero > 0, resolution=96.0)
+            finally:
+                page.close()
+    return len(limites)

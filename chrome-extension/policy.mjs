@@ -9,11 +9,24 @@ export function backendOrigin(value) {
   return url.origin;
 }
 
+// Même site = même domaine, avec ou sans « www. », et passage http -> https admis
+// (redirections normales d'un marchand). Tout autre domaine reste refusé.
+const bareHost = host => host.toLowerCase().replace(/^www\./, '');
 export function sameSite(expected, actual) {
   try {
-    const url = new URL(actual);
-    return publicProductURL(expected) && url.origin === new URL(expected).origin && !url.username && !url.password;
+    const url = new URL(actual), ref = new URL(expected);
+    return publicProductURL(expected) && publicProductURL(actual) && bareHost(url.hostname) === bareHost(ref.hostname) &&
+      (url.protocol === ref.protocol || (ref.protocol === 'http:' && url.protocol === 'https:')) &&
+      !url.username && !url.password;
   } catch { return false; }
+}
+
+// Raison lisible quand la page est chargée mais inexploitable.
+export function failureReason(status, page) {
+  if (status === 'navigation') return 'Page introuvable ou lien obsolète.';
+  if (status !== 'capture') return '';
+  const length = (page?.text || '').trim().length;
+  return length < 50 ? `Page vide ou presque (${length} caractère(s) de texte).` : 'Le site affiche une page d’erreur.';
 }
 
 export function verdict(page) {

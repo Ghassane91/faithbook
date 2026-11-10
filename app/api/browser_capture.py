@@ -39,6 +39,16 @@ ERRORS = {"challenge": "Vérification humaine requise dans Chrome.",
 # leur motif (statut « skipped »), sans être comptés comme des échecs.
 REFUSED = "Refusé par le marchand : accès bloqué pour ce navigateur (aucun contournement tenté)."
 DEAD_LINK = "Lien mort (404) : à corriger dans HuntX."
+GONE = "Produit retiré par le marchand : lien à mettre à jour dans HuntX."
+GONE_PAGE = re.compile(r"no longer available online|(?:product|item) is no longer available|(?:product|item) has been discontinued", re.I)
+
+
+def same_site(expected, final):
+    """Même domaine, avec ou sans www ; le passage http -> https est admis."""
+    bare = lambda host: (host or '').lower().removeprefix('www.')
+    return (bool(final.hostname) and bare(final.hostname) == bare(expected.hostname)
+            and final.port in (None, 80, 443)
+            and (final.scheme == expected.scheme or (expected.scheme == 'http' and final.scheme == 'https')))
 REFUSED_PAGE = re.compile(r"\baccess denied\b|you don['’]t have permission to access|errors\.edgesuite\.net|\b403 forbidden\b", re.I)
 
 
@@ -398,10 +408,11 @@ async def _receive_result(request: Request, device, session: Session):
         captured_at = stamp
     state = payload.status
     missing_page = bool(re.search(r"(?:couldn['’]t|cannot|can['’]t) find (?:this|that|the) page|page not found|404\s*[-:]?\s*not found|couldn['’]t be found|page (?:does not|doesn't) exist|page introuvable", payload.title + '\n' + payload.text, re.I))
+    product_gone = bool(GONE_PAGE.search(payload.text[:20000]))
     if state == "success":
         final = urlsplit(payload.final_url)
         expected = urlsplit(target.url)
-        if final.scheme != expected.scheme or final.netloc != expected.netloc or final.username or final.password:
+        if not same_site(expected, final) or final.username or final.password:
             raise HTTPException(422, "La capture doit rester sur le site prévu.")
         if detect_challenge(payload.title, payload.text) or "click the button below to continue shopping" in payload.text.lower():
             state = "challenge"
@@ -409,6 +420,8 @@ async def _receive_result(request: Request, device, session: Session):
             state = "capture"
         elif missing_page:
             state = 'navigation'
+        elif product_gone:
+            state = 'capture'
         elif len(payload.text.strip()) < 50 or "something went wrong" in payload.text.lower():
             state = "capture"
         else:
@@ -419,6 +432,8 @@ async def _receive_result(request: Request, device, session: Session):
             skipped_reason = REFUSED
         elif missing_page:
             skipped_reason = DEAD_LINK
+        elif product_gone:
+            skipped_reason = GONE
     try:
         quotas.enforce_capture_creation(session, device.organization_id)
         run = Run(target_id=target.id, status=RunStatus.success if data else

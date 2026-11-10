@@ -106,8 +106,26 @@ def _comparer_tarifs(nom: str, avant: dict, apres: dict) -> list[Evenement]:
     )
 
 
-def comparer(regle: str, avant: list[dict[str, Any]], apres: list[dict[str, Any]]) -> list[Evenement]:
-    """Evenements a signaler entre deux extractions de la meme regle."""
+def comparer(
+    regle: str,
+    avant: list[dict[str, Any]],
+    apres: list[dict[str, Any]],
+    plafond: int | None = None,
+) -> list[Evenement]:
+    """Evenements a signaler entre deux extractions de la meme regle.
+
+    `plafond` est le nombre maximal de lignes que l extraction conserve
+    (`max_lignes` de la regle). Une liste qui l atteint est tronquee : une
+    ligne peut alors sortir de la liste, ou y entrer, simplement parce qu une
+    autre a pris sa place sous la limite, sans avoir quitte la page. Dans ce
+    cas on ne signale ni retrait (liste `apres` tronquee) ni ajout (liste
+    `avant` tronquee) ; les changements de prix des lignes presentes des deux
+    cotes restent signales. L editorial n est pas concerne : une nouvelle
+    annonce apparait en tete et pousse les anciennes hors de la limite, c est
+    le cas normal et c est justement ce qu on veut signaler.
+    """
+    avant_tronque = plafond is not None and len(avant) >= plafond
+    apres_tronque = plafond is not None and len(apres) >= plafond
     ia, ib = _index(regle, avant), _index(regle, apres)
     champ = CLES.get(regle)
     if not champ:
@@ -132,13 +150,14 @@ def comparer(regle: str, avant: list[dict[str, Any]], apres: list[dict[str, Any]
     evts: list[Evenement] = []
     libelle = "produit" if regle == "catalogue" else "forfait"
     for c, ligne in ib.items():
-        if c not in ia:
+        if c not in ia and not avant_tronque:
             devise = ligne.get("devise")
             prix = ligne.get("prix") if regle == "catalogue" else ligne.get("prix_mensuel")
             suffixe = f", {_montant(prix, devise)}" if prix is not None else ""
             evts.append(Evenement("ajout", nom(ligne), f"nouveau {libelle}{suffixe}"))
-    for c in retires:
-        evts.append(Evenement("retrait", nom(ia[c]), f"{libelle} retire de la page"))
+    if not apres_tronque:
+        for c in retires:
+            evts.append(Evenement("retrait", nom(ia[c]), f"{libelle} retire de la page"))
     for c in ib:
         if c in ia:
             comparateur = _comparer_catalogue if regle == "catalogue" else _comparer_tarifs

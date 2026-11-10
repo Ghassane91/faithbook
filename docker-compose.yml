@@ -102,6 +102,10 @@ services:
       QUEUE_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: "${POSTGRES_DATABASE_URL:-postgresql+psycopg://faithbook:faithbook-local-change-me@db:5432/faithbook}"
+      # glibc ouvre une arene memoire par thread (jusqu'a 8 x CPU) ; sur une
+      # machine partagee de 4 Go cela gonfle la memoire gardee apres chaque
+      # capture. Deux arenes suffisent a un worker qui traite un run a la fois.
+      MALLOC_ARENA_MAX: "2"
     volumes:
       - ./data:/data
       - "${OUTPUT_DIR:-./data/screenshots}:/output"
